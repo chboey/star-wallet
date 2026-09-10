@@ -4,8 +4,10 @@ pragma solidity ^0.8.24;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { IAqua } from "./interfaces/IAqua.sol";
+import { IChainlinkAggregatorV3 } from "./interfaces/IChainlinkAggregatorV3.sol";
 import { IStarRegistry } from "./interfaces/IStarRegistry.sol";
 import { IStarToken } from "./interfaces/IStarToken.sol";
 
@@ -18,8 +20,11 @@ contract StarFamilyVault is ReentrancyGuard {
         (uint256(1) << 254) | (uint256(0x0028002800280028) << 160);
     uint256 public constant MAX_STRATEGY_BYTES = 4_096;
     uint16 public constant MAX_STRATEGY_FEE_BPS = 1_000;
+    uint16 public constant BPS_DENOMINATOR = 10_000;
+    uint16 public constant MAX_PRICE_DEVIATION_BPS_LIMIT = 2_500;
     uint40 public constant MIN_STRATEGY_LIFETIME_SECONDS = 60;
-    uint40 public constant MAX_STRATEGY_LIFETIME_SECONDS = 1 days;
+    uint40 public constant MAX_STRATEGY_LIFETIME_LIMIT_SECONDS = 1 days;
+    uint32 public constant MAX_ORACLE_AGE_LIMIT_SECONDS = 7 days;
 
     uint256 private constant CONCENTRATED_PROGRAM_LENGTH = 83;
     uint256 private constant CONCENTRATED_PROGRAM_WITH_FEE_LENGTH = 88;
@@ -35,12 +40,24 @@ contract StarFamilyVault is ReentrancyGuard {
         bytes data;
     }
 
+    struct AquaSafetyConfig {
+        address ethUsdFeed;
+        address usdcUsdFeed;
+        uint32 ethUsdMaxAgeSeconds;
+        uint32 usdcUsdMaxAgeSeconds;
+        uint16 maxStrategyPriceDeviationBps;
+        uint40 maxStrategyLifetimeSeconds;
+        uint256 maxPositionUsdc;
+        uint256 maxPositionWeth;
+    }
+
     struct StrategyParameters {
         uint256 sqrtPriceMin;
         uint256 sqrtPriceMax;
         uint16 feeBps;
         uint64 salt;
         uint40 deadline;
+        uint256 oracleRawPrice;
     }
 
     struct FamilyAccount {
@@ -59,6 +76,7 @@ contract StarFamilyVault is ReentrancyGuard {
         uint16 positionFeeBps;
         uint64 positionSalt;
         uint40 positionDeadline;
+        uint256 positionOracleRawPrice;
     }
 
     uint256 public immutable familyId;
@@ -68,6 +86,16 @@ contract StarFamilyVault is ReentrancyGuard {
     IStarToken public immutable star;
     IAqua public immutable aqua;
     address public immutable swapVmApp;
+    IChainlinkAggregatorV3 public immutable ethUsdFeed;
+    IChainlinkAggregatorV3 public immutable usdcUsdFeed;
+    uint8 public immutable ethUsdFeedDecimals;
+    uint8 public immutable usdcUsdFeedDecimals;
+    uint32 public immutable ethUsdMaxAgeSeconds;
+    uint32 public immutable usdcUsdMaxAgeSeconds;
+    uint16 public immutable maxStrategyPriceDeviationBps;
+    uint40 public immutable maxStrategyLifetimeSeconds;
+    uint256 public immutable maxPositionUsdc;
+    uint256 public immutable maxPositionWeth;
     uint256 public nextRewardId = 1;
 
     FamilyAccount private familyAccount;
@@ -97,10 +125,26 @@ contract StarFamilyVault is ReentrancyGuard {
     error InvalidStrategySalt();
     error InvalidStrategyDeadline(uint256 deadline, uint256 currentTimestamp);
     error StrategyDeadlineTooFar(uint256 deadline, uint256 maximumDeadline);
+    error StrategyPriceOutsideOracleBounds(
+        uint256 rawPriceMin,
+        uint256 oracleRawPrice,
+        uint256 rawPriceMax,
+        uint256 minimumAllowed,
+        uint256 maximumAllowed
+    );
     error InvalidStrategyMaker(address expected, address actual);
     error InvalidStrategyTraits(uint256 expected, uint256 actual);
     error StrategyHashAlreadyUsed(bytes32 strategyHash);
     error StrategyHashMismatch(bytes32 expected, bytes32 actual);
+    error InvalidSafetyConfiguration();
+    error InvalidTokenOrder(address tokenLt, address tokenGt);
+    error InvalidOracleDecimals(address feed, uint8 decimals);
+    error InvalidOracleRound(address feed, uint80 roundId, uint80 answeredInRound);
+    error InvalidOracleAnswer(address feed, int256 answer);
+    error InvalidOracleTimestamp(address feed, uint256 updatedAt, uint256 currentTimestamp);
+    error StaleOraclePrice(address feed, uint256 updatedAt, uint256 maximumAge);
+    error PositionUsdcLimitExceeded(uint256 requested, uint256 maximum);
+    error PositionWethLimitExceeded(uint256 requested, uint256 maximum);
 
     event StarsRewarded(
         uint256 indexed rewardId,
@@ -131,7 +175,8 @@ contract StarFamilyVault is ReentrancyGuard {
         uint256 sqrtPriceMax,
         uint16 feeBps,
         uint64 salt,
-        uint40 deadline
+        uint40 deadline,
+        uint256 oracleRawPrice
     );
 
     constructor(
@@ -141,19 +186,41 @@ contract StarFamilyVault is ReentrancyGuard {
         address registryAddress,
         address starAddress,
         address aquaAddress,
-        address swapVmAddress
+        address swapVmAddress,
+        AquaSafetyConfig memory safety
     ) {
         if (familyId_ == 0) revert InvalidFamilyId();
         if (
             usdcAddress == address(0) || wethAddress == address(0) || registryAddress == address(0)
                 || starAddress == address(0) || aquaAddress == address(0)
-                || swapVmAddress == address(0)
+                || swapVmAddress == address(0) || safety.ethUsdFeed == address(0)
+                || safety.usdcUsdFeed == address(0)
         ) revert ZeroAddress();
         IStarRegistry(registryAddress).getFamily(familyId_);
         uint8 usdcDecimals = IERC20Metadata(usdcAddress).decimals();
         if (usdcDecimals != 6) revert InvalidUsdcDecimals(usdcDecimals);
         uint8 wethDecimals = IERC20Metadata(wethAddress).decimals();
         if (wethDecimals != 18) revert InvalidWethDecimals(wethDecimals);
+        if (wethAddress == usdcAddress) revert InvalidTokenOrder(wethAddress, usdcAddress);
+        if (
+            safety.ethUsdMaxAgeSeconds == 0 || safety.usdcUsdMaxAgeSeconds == 0
+                || safety.ethUsdMaxAgeSeconds > MAX_ORACLE_AGE_LIMIT_SECONDS
+                || safety.usdcUsdMaxAgeSeconds > MAX_ORACLE_AGE_LIMIT_SECONDS
+                || safety.maxStrategyPriceDeviationBps == 0
+                || safety.maxStrategyPriceDeviationBps > MAX_PRICE_DEVIATION_BPS_LIMIT
+                || safety.maxStrategyLifetimeSeconds < MIN_STRATEGY_LIFETIME_SECONDS
+                || safety.maxStrategyLifetimeSeconds > MAX_STRATEGY_LIFETIME_LIMIT_SECONDS
+                || safety.maxPositionUsdc == 0 || safety.maxPositionWeth == 0
+        ) revert InvalidSafetyConfiguration();
+
+        uint8 ethFeedDecimals = IChainlinkAggregatorV3(safety.ethUsdFeed).decimals();
+        uint8 usdcFeedDecimals = IChainlinkAggregatorV3(safety.usdcUsdFeed).decimals();
+        if (ethFeedDecimals > 18) {
+            revert InvalidOracleDecimals(safety.ethUsdFeed, ethFeedDecimals);
+        }
+        if (usdcFeedDecimals > 18) {
+            revert InvalidOracleDecimals(safety.usdcUsdFeed, usdcFeedDecimals);
+        }
 
         familyId = familyId_;
         usdc = IERC20(usdcAddress);
@@ -162,6 +229,16 @@ contract StarFamilyVault is ReentrancyGuard {
         star = IStarToken(starAddress);
         aqua = IAqua(aquaAddress);
         swapVmApp = swapVmAddress;
+        ethUsdFeed = IChainlinkAggregatorV3(safety.ethUsdFeed);
+        usdcUsdFeed = IChainlinkAggregatorV3(safety.usdcUsdFeed);
+        ethUsdFeedDecimals = ethFeedDecimals;
+        usdcUsdFeedDecimals = usdcFeedDecimals;
+        ethUsdMaxAgeSeconds = safety.ethUsdMaxAgeSeconds;
+        usdcUsdMaxAgeSeconds = safety.usdcUsdMaxAgeSeconds;
+        maxStrategyPriceDeviationBps = safety.maxStrategyPriceDeviationBps;
+        maxStrategyLifetimeSeconds = safety.maxStrategyLifetimeSeconds;
+        maxPositionUsdc = safety.maxPositionUsdc;
+        maxPositionWeth = safety.maxPositionWeth;
 
         IERC20(usdcAddress).forceApprove(aquaAddress, type(uint256).max);
         IERC20(wethAddress).forceApprove(aquaAddress, type(uint256).max);
@@ -284,6 +361,18 @@ contract StarFamilyVault is ReentrancyGuard {
         return _validateStrategy(strategy);
     }
 
+    function currentOracleRawPrice() public view returns (uint256 rawPrice) {
+        uint256 ethUsd18 = _freshUsdPrice18(ethUsdFeed, ethUsdFeedDecimals, ethUsdMaxAgeSeconds);
+        uint256 usdcUsd18 = _freshUsdPrice18(usdcUsdFeed, usdcUsdFeedDecimals, usdcUsdMaxAgeSeconds);
+        // SwapVM prices are tokenGt units / tokenLt units, scaled by 1e18.
+        // Sepolia USDC sorts before WETH: invert the USD ratio and account for
+        // 6/18 token decimals directly, without inverting a rounded price.
+        rawPrice = address(usdc) < address(weth)
+            ? Math.mulDiv(usdcUsd18, 1e30, ethUsd18)
+            : Math.mulDiv(ethUsd18, 1e6, usdcUsd18);
+        if (rawPrice == 0) revert InvalidSafetyConfiguration();
+    }
+
     function _shipSavingsPosition(bytes calldata strategy, uint256 usdcAmount, uint256 wethAmount)
         private
         returns (bytes32 strategyHash)
@@ -293,6 +382,12 @@ contract StarFamilyVault is ReentrancyGuard {
             revert PositionAlreadyActive(familyAccount.strategyHash);
         }
         if (usdcAmount == 0 || wethAmount == 0) revert ZeroAmount();
+        if (usdcAmount > maxPositionUsdc) {
+            revert PositionUsdcLimitExceeded(usdcAmount, maxPositionUsdc);
+        }
+        if (wethAmount > maxPositionWeth) {
+            revert PositionWethLimitExceeded(wethAmount, maxPositionWeth);
+        }
         if (familyAccount.availableUsdc < usdcAmount) {
             revert InsufficientAvailableUsdc(familyAccount.availableUsdc, usdcAmount);
         }
@@ -322,6 +417,7 @@ contract StarFamilyVault is ReentrancyGuard {
         familyAccount.positionFeeBps = parameters.feeBps;
         familyAccount.positionSalt = parameters.salt;
         familyAccount.positionDeadline = parameters.deadline;
+        familyAccount.positionOracleRawPrice = parameters.oracleRawPrice;
         strategyHashUsed[strategyHash] = true;
         emit SavingsPositionUpdated(familyId, strategyHash, usdcAmount, wethAmount, true);
         emit SavingsStrategyConfigured(
@@ -331,7 +427,8 @@ contract StarFamilyVault is ReentrancyGuard {
             parameters.sqrtPriceMax,
             parameters.feeBps,
             parameters.salt,
-            parameters.deadline
+            parameters.deadline,
+            parameters.oracleRawPrice
         );
     }
 
@@ -355,6 +452,7 @@ contract StarFamilyVault is ReentrancyGuard {
         familyAccount.positionFeeBps = 0;
         familyAccount.positionSalt = 0;
         familyAccount.positionDeadline = 0;
+        familyAccount.positionOracleRawPrice = 0;
         emit SavingsPositionUpdated(familyId, strategyHash, currentUsdc, currentWeth, false);
     }
 
@@ -406,7 +504,7 @@ contract StarFamilyVault is ReentrancyGuard {
             revert InvalidStrategyProgram();
         }
         parameters.deadline = _readUint40(program, 2);
-        uint256 maximumDeadline = block.timestamp + MAX_STRATEGY_LIFETIME_SECONDS;
+        uint256 maximumDeadline = block.timestamp + maxStrategyLifetimeSeconds;
         if (parameters.deadline < block.timestamp + MIN_STRATEGY_LIFETIME_SECONDS) {
             revert InvalidStrategyDeadline(parameters.deadline, block.timestamp);
         }
@@ -442,6 +540,8 @@ contract StarFamilyVault is ReentrancyGuard {
         if (parameters.sqrtPriceMin == 0 || parameters.sqrtPriceMax <= parameters.sqrtPriceMin) {
             revert InvalidStrategyPriceRange(parameters.sqrtPriceMin, parameters.sqrtPriceMax);
         }
+        parameters.oracleRawPrice =
+            _validateStrategyPrices(parameters.sqrtPriceMin, parameters.sqrtPriceMax);
 
         uint256 saltOffset = concentrateOffset + 66;
         if (program[saltOffset] != SALT_OPCODE || program[saltOffset + 1] != bytes1(uint8(8))) {
@@ -449,6 +549,52 @@ contract StarFamilyVault is ReentrancyGuard {
         }
         parameters.salt = _readUint64(program, saltOffset + 2);
         if (parameters.salt == 0) revert InvalidStrategySalt();
+    }
+
+    function _validateStrategyPrices(uint256 sqrtPriceMin, uint256 sqrtPriceMax)
+        private
+        view
+        returns (uint256 oracleRawPrice)
+    {
+        uint256 rawPriceMin = Math.mulDiv(sqrtPriceMin, sqrtPriceMin, 1e18);
+        uint256 rawPriceMax = Math.mulDiv(sqrtPriceMax, sqrtPriceMax, 1e18);
+        oracleRawPrice = currentOracleRawPrice();
+        uint256 minimumAllowed = Math.mulDiv(
+            oracleRawPrice, BPS_DENOMINATOR - maxStrategyPriceDeviationBps, BPS_DENOMINATOR
+        );
+        uint256 maximumAllowed = Math.mulDiv(
+            oracleRawPrice, BPS_DENOMINATOR + maxStrategyPriceDeviationBps, BPS_DENOMINATOR
+        );
+
+        if (
+            rawPriceMin > oracleRawPrice || rawPriceMax < oracleRawPrice
+                || (rawPriceMin < minimumAllowed && minimumAllowed - rawPriceMin > 1)
+                || rawPriceMax > maximumAllowed
+        ) {
+            revert StrategyPriceOutsideOracleBounds(
+                rawPriceMin, oracleRawPrice, rawPriceMax, minimumAllowed, maximumAllowed
+            );
+        }
+    }
+
+    function _freshUsdPrice18(IChainlinkAggregatorV3 feed, uint8 feedDecimals, uint32 maximumAge)
+        private
+        view
+        returns (uint256)
+    {
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) =
+            feed.latestRoundData();
+        if (answer <= 0) revert InvalidOracleAnswer(address(feed), answer);
+        if (roundId == 0 || answeredInRound < roundId) {
+            revert InvalidOracleRound(address(feed), roundId, answeredInRound);
+        }
+        if (updatedAt == 0 || updatedAt > block.timestamp) {
+            revert InvalidOracleTimestamp(address(feed), updatedAt, block.timestamp);
+        }
+        if (block.timestamp - updatedAt > maximumAge) {
+            revert StaleOraclePrice(address(feed), updatedAt, maximumAge);
+        }
+        return uint256(answer) * 10 ** (18 - feedDecimals);
     }
 
     function _readUint256(bytes memory data, uint256 offset) private pure returns (uint256 value) {

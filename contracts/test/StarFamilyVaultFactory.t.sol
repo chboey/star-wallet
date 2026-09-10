@@ -6,6 +6,7 @@ import { StarFamilyVault } from "../src/StarFamilyVault.sol";
 import { StarFamilyVaultFactory } from "../src/StarFamilyVaultFactory.sol";
 import { StarRegistry } from "../src/StarRegistry.sol";
 import { StarToken } from "../src/StarToken.sol";
+import { IChainlinkAggregatorV3 } from "../src/interfaces/IChainlinkAggregatorV3.sol";
 
 interface VaultFactoryVm {
     function expectRevert(bytes4 selector) external;
@@ -25,6 +26,19 @@ contract MockFactoryAsset is ERC20 {
     }
 }
 
+contract MockFactoryFeed is IChainlinkAggregatorV3 {
+    uint8 public immutable override decimals = 8;
+    int256 private immutable answer;
+
+    constructor(int256 answer_) {
+        answer = answer_;
+    }
+
+    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
+        return (1, answer, block.timestamp, block.timestamp, 1);
+    }
+}
+
 contract StarFamilyVaultFactoryTest {
     VaultFactoryVm private constant VM =
         VaultFactoryVm(address(uint160(uint256(keccak256("hevm cheat code")))));
@@ -34,6 +48,8 @@ contract StarFamilyVaultFactoryTest {
     StarToken private star;
     MockFactoryAsset private usdc;
     MockFactoryAsset private weth;
+    MockFactoryFeed private ethFeed;
+    MockFactoryFeed private usdcFeed;
     StarFamilyVaultFactory private factory;
     uint256 private familyId;
     address private constant AQUA = address(0xA11A);
@@ -44,8 +60,10 @@ contract StarFamilyVaultFactoryTest {
         star = new StarToken(address(this));
         usdc = new MockFactoryAsset("USD Coin", "USDC", 6);
         weth = new MockFactoryAsset("Wrapped Ether", "WETH", 18);
+        ethFeed = new MockFactoryFeed(2_000e8);
+        usdcFeed = new MockFactoryFeed(1e8);
         factory = new StarFamilyVaultFactory(
-            address(registry), address(star), address(usdc), address(weth), AQUA, SWAP_VM
+            address(registry), address(star), address(usdc), address(weth), AQUA, SWAP_VM, _safety()
         );
         star.grantRole(star.VAULT_FACTORY_ROLE(), address(factory));
         familyId = registry.createFamily("family.starwallet.eth");
@@ -62,6 +80,10 @@ contract StarFamilyVaultFactoryTest {
         require(address(vault.weth()) == address(weth), "WETH");
         require(address(vault.aqua()) == AQUA, "Aqua");
         require(vault.swapVmApp() == SWAP_VM, "SwapVM");
+        require(address(vault.ethUsdFeed()) == address(ethFeed), "ETH/USD feed");
+        require(address(vault.usdcUsdFeed()) == address(usdcFeed), "USDC/USD feed");
+        require(vault.maxPositionUsdc() == 100_000_000, "USDC exposure");
+        require(vault.maxPositionWeth() == 10 ether, "WETH exposure");
         require(star.hasRole(star.MINTER_ROLE(), vaultAddress), "minter role");
         require(factory.vaultByFamily(familyId) == vaultAddress, "family lookup");
         require(factory.familyIdByVault(vaultAddress) == familyId, "vault lookup");
@@ -97,7 +119,20 @@ contract StarFamilyVaultFactoryTest {
     function testRejectsZeroConfiguration() public {
         VM.expectRevert(StarFamilyVaultFactory.ZeroAddress.selector);
         new StarFamilyVaultFactory(
-            address(0), address(star), address(usdc), address(weth), AQUA, SWAP_VM
+            address(0), address(star), address(usdc), address(weth), AQUA, SWAP_VM, _safety()
         );
+    }
+
+    function _safety() private view returns (StarFamilyVault.AquaSafetyConfig memory) {
+        return StarFamilyVault.AquaSafetyConfig({
+            ethUsdFeed: address(ethFeed),
+            usdcUsdFeed: address(usdcFeed),
+            ethUsdMaxAgeSeconds: 3_600,
+            usdcUsdMaxAgeSeconds: 90_000,
+            maxStrategyPriceDeviationBps: 1_000,
+            maxStrategyLifetimeSeconds: 1_800,
+            maxPositionUsdc: 100_000_000,
+            maxPositionWeth: 10 ether
+        });
     }
 }
