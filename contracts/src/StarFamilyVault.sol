@@ -5,6 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { IAqua } from "./interfaces/IAqua.sol";
 import { IStarRegistry } from "./interfaces/IStarRegistry.sol";
 import { IStarToken } from "./interfaces/IStarToken.sol";
 
@@ -18,6 +19,10 @@ contract StarFamilyVault is ReentrancyGuard {
         uint256 totalPrincipalWithdrawn;
         uint256 availableUsdc;
         uint256 availableWeth;
+        uint256 positionOpeningUsdc;
+        uint256 positionOpeningWeth;
+        bytes32 strategyHash;
+        bool positionActive;
         uint256 totalUsdcWithdrawn;
         uint256 totalWethWithdrawn;
     }
@@ -27,6 +32,8 @@ contract StarFamilyVault is ReentrancyGuard {
     IERC20 public immutable weth;
     IStarRegistry public immutable registry;
     IStarToken public immutable star;
+    IAqua public immutable aqua;
+    address public immutable swapVmApp;
     uint256 public nextRewardId = 1;
 
     FamilyAccount private familyAccount;
@@ -45,6 +52,9 @@ contract StarFamilyVault is ReentrancyGuard {
     error InvalidRecipient();
     error InsufficientAvailableUsdc(uint256 available, uint256 requested);
     error InsufficientAvailableWeth(uint256 available, uint256 requested);
+    error PositionAlreadyActive(bytes32 strategyHash);
+    error PositionNotActive();
+    error InvalidStrategy();
 
     event StarsRewarded(
         uint256 indexed rewardId,
@@ -61,18 +71,28 @@ contract StarFamilyVault is ReentrancyGuard {
     event StrategyWethWithdrawn(
         uint256 indexed familyId, uint256 amount, address indexed recipient
     );
+    event SavingsPositionUpdated(
+        uint256 indexed familyId,
+        bytes32 indexed strategyHash,
+        uint256 usdcAmount,
+        uint256 wethAmount,
+        bool active
+    );
 
     constructor(
         uint256 familyId_,
         address usdcAddress,
         address wethAddress,
         address registryAddress,
-        address starAddress
+        address starAddress,
+        address aquaAddress,
+        address swapVmAddress
     ) {
         if (familyId_ == 0) revert InvalidFamilyId();
         if (
             usdcAddress == address(0) || wethAddress == address(0) || registryAddress == address(0)
-                || starAddress == address(0)
+                || starAddress == address(0) || aquaAddress == address(0)
+                || swapVmAddress == address(0)
         ) revert ZeroAddress();
         IStarRegistry(registryAddress).getFamily(familyId_);
         uint8 usdcDecimals = IERC20Metadata(usdcAddress).decimals();
@@ -85,6 +105,11 @@ contract StarFamilyVault is ReentrancyGuard {
         weth = IERC20(wethAddress);
         registry = IStarRegistry(registryAddress);
         star = IStarToken(starAddress);
+        aqua = IAqua(aquaAddress);
+        swapVmApp = swapVmAddress;
+
+        IERC20(usdcAddress).forceApprove(aquaAddress, type(uint256).max);
+        IERC20(wethAddress).forceApprove(aquaAddress, type(uint256).max);
     }
 
     function rewardStars(uint256 childId, uint256 amount, string calldata reason)
@@ -153,12 +178,96 @@ contract StarFamilyVault is ReentrancyGuard {
         emit StrategyWethWithdrawn(familyId, amount, recipient);
     }
 
+    function shipSavingsPosition(bytes calldata strategy, uint256 usdcAmount, uint256 wethAmount)
+        external
+        nonReentrant
+        returns (bytes32 strategyHash)
+    {
+        _requireActiveParent(msg.sender);
+        return _shipSavingsPosition(strategy, usdcAmount, wethAmount);
+    }
+
+    function replaceSavingsPosition(bytes calldata strategy, uint256 usdcAmount, uint256 wethAmount)
+        external
+        nonReentrant
+        returns (bytes32 oldStrategyHash, bytes32 newStrategyHash)
+    {
+        _requireActiveParent(msg.sender);
+        oldStrategyHash = _dockSavingsPosition();
+        newStrategyHash = _shipSavingsPosition(strategy, usdcAmount, wethAmount);
+    }
+
+    function dockSavingsPosition() external nonReentrant {
+        _requireParent(msg.sender);
+        _dockSavingsPosition();
+    }
+
     function getFamilyAccount() external view returns (FamilyAccount memory) {
         return familyAccount;
     }
 
     function netPrincipal() external view returns (uint256) {
         return familyAccount.totalPrincipalContributed - familyAccount.totalPrincipalWithdrawn;
+    }
+
+    function currentPositionBalances()
+        external
+        view
+        returns (uint256 currentUsdc, uint256 currentWeth)
+    {
+        if (!familyAccount.positionActive) revert PositionNotActive();
+        return aqua.safeBalances(
+            address(this), swapVmApp, familyAccount.strategyHash, address(usdc), address(weth)
+        );
+    }
+
+    function _shipSavingsPosition(bytes calldata strategy, uint256 usdcAmount, uint256 wethAmount)
+        private
+        returns (bytes32 strategyHash)
+    {
+        if (strategy.length == 0) revert InvalidStrategy();
+        if (familyAccount.positionActive) {
+            revert PositionAlreadyActive(familyAccount.strategyHash);
+        }
+        if (usdcAmount == 0 || wethAmount == 0) revert ZeroAmount();
+        if (familyAccount.availableUsdc < usdcAmount) {
+            revert InsufficientAvailableUsdc(familyAccount.availableUsdc, usdcAmount);
+        }
+        if (familyAccount.availableWeth < wethAmount) {
+            revert InsufficientAvailableWeth(familyAccount.availableWeth, wethAmount);
+        }
+
+        address[] memory tokens = _positionTokens();
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = usdcAmount;
+        amounts[1] = wethAmount;
+        strategyHash = aqua.ship(swapVmApp, strategy, tokens, amounts);
+
+        familyAccount.availableUsdc -= usdcAmount;
+        familyAccount.availableWeth -= wethAmount;
+        familyAccount.positionOpeningUsdc = usdcAmount;
+        familyAccount.positionOpeningWeth = wethAmount;
+        familyAccount.strategyHash = strategyHash;
+        familyAccount.positionActive = true;
+        emit SavingsPositionUpdated(familyId, strategyHash, usdcAmount, wethAmount, true);
+    }
+
+    function _dockSavingsPosition() private returns (bytes32 strategyHash) {
+        if (!familyAccount.positionActive) revert PositionNotActive();
+
+        strategyHash = familyAccount.strategyHash;
+        (uint256 currentUsdc, uint256 currentWeth) = aqua.safeBalances(
+            address(this), swapVmApp, strategyHash, address(usdc), address(weth)
+        );
+        aqua.dock(swapVmApp, strategyHash, _positionTokens());
+
+        familyAccount.availableUsdc += currentUsdc;
+        familyAccount.availableWeth += currentWeth;
+        familyAccount.positionOpeningUsdc = 0;
+        familyAccount.positionOpeningWeth = 0;
+        familyAccount.strategyHash = bytes32(0);
+        familyAccount.positionActive = false;
+        emit SavingsPositionUpdated(familyId, strategyHash, currentUsdc, currentWeth, false);
     }
 
     function _requireParent(address account) private view {
@@ -170,5 +279,11 @@ contract StarFamilyVault is ReentrancyGuard {
         _requireParent(account);
         IStarRegistry.Family memory family = registry.getFamily(familyId);
         if (!family.active) revert FamilyInactive(familyId);
+    }
+
+    function _positionTokens() private view returns (address[] memory tokens) {
+        tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weth);
     }
 }

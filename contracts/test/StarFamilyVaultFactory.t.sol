@@ -36,6 +36,8 @@ contract StarFamilyVaultFactoryTest {
     MockFactoryAsset private weth;
     StarFamilyVaultFactory private factory;
     uint256 private familyId;
+    address private constant AQUA = address(0xA11A);
+    address private constant SWAP_VM = address(0x1111);
 
     function setUp() public {
         registry = new StarRegistry();
@@ -43,7 +45,7 @@ contract StarFamilyVaultFactoryTest {
         usdc = new MockFactoryAsset("USD Coin", "USDC", 6);
         weth = new MockFactoryAsset("Wrapped Ether", "WETH", 18);
         factory = new StarFamilyVaultFactory(
-            address(registry), address(star), address(usdc), address(weth)
+            address(registry), address(star), address(usdc), address(weth), AQUA, SWAP_VM
         );
         star.grantRole(star.VAULT_FACTORY_ROLE(), address(factory));
         familyId = registry.createFamily("family.starwallet.eth");
@@ -58,6 +60,8 @@ contract StarFamilyVaultFactoryTest {
         require(address(vault.star()) == address(star), "Star token");
         require(address(vault.usdc()) == address(usdc), "USDC");
         require(address(vault.weth()) == address(weth), "WETH");
+        require(address(vault.aqua()) == AQUA, "Aqua");
+        require(vault.swapVmApp() == SWAP_VM, "SwapVM");
         require(star.hasRole(star.MINTER_ROLE(), vaultAddress), "minter role");
         require(factory.vaultByFamily(familyId) == vaultAddress, "family lookup");
         require(factory.familyIdByVault(vaultAddress) == familyId, "vault lookup");
@@ -92,6 +96,8 @@ contract StarFamilyVaultFactoryTest {
 
     function testRejectsZeroConfiguration() public {
         VM.expectRevert(StarFamilyVaultFactory.ZeroAddress.selector);
-        new StarFamilyVaultFactory(address(0), address(star), address(usdc), address(weth));
+        new StarFamilyVaultFactory(
+            address(0), address(star), address(usdc), address(weth), AQUA, SWAP_VM
+        );
     }
 }

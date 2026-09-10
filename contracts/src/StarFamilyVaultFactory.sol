@@ -10,6 +10,8 @@ contract StarFamilyVaultFactory {
     IStarToken public immutable star;
     address public immutable usdc;
     address public immutable weth;
+    address public immutable aqua;
+    address public immutable swapVmApp;
 
     mapping(uint256 familyId => address vault) public vaultByFamily;
     mapping(address vault => uint256 familyId) public familyIdByVault;
@@ -27,17 +29,22 @@ contract StarFamilyVaultFactory {
         address registryAddress,
         address starAddress,
         address usdcAddress,
-        address wethAddress
+        address wethAddress,
+        address aquaAddress,
+        address swapVmAddress
     ) {
         if (
             registryAddress == address(0) || starAddress == address(0) || usdcAddress == address(0)
-                || wethAddress == address(0)
+                || wethAddress == address(0) || aquaAddress == address(0)
+                || swapVmAddress == address(0)
         ) revert ZeroAddress();
 
         registry = IStarRegistry(registryAddress);
         star = IStarToken(starAddress);
         usdc = usdcAddress;
         weth = wethAddress;
+        aqua = aquaAddress;
+        swapVmApp = swapVmAddress;
     }
 
     function createFamilyVault(uint256 familyId) external returns (address vaultAddress) {
@@ -49,8 +56,9 @@ contract StarFamilyVaultFactory {
             revert FamilyVaultAlreadyExists(familyId, existingVault);
         }
 
-        StarFamilyVault vault =
-            new StarFamilyVault(familyId, usdc, weth, address(registry), address(star));
+        StarFamilyVault vault = new StarFamilyVault(
+            familyId, usdc, weth, address(registry), address(star), aqua, swapVmApp
+        );
         vaultAddress = address(vault);
         vaultByFamily[familyId] = vaultAddress;
         familyIdByVault[vaultAddress] = familyId;
