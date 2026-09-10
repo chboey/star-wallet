@@ -8,12 +8,15 @@ interface RegistryVm {
     function expectRevert(bytes4 selector) external;
     function expectPartialRevert(bytes4 selector) external;
     function prank(address caller) external;
+    function startPrank(address caller) external;
+    function stopPrank() external;
 }
 
 contract StarRegistryTest {
     RegistryVm private constant VM =
         RegistryVm(address(uint160(uint256(keccak256("hevm cheat code")))));
     address private constant OTHER = address(0xB0B);
+    address private constant CHILD = address(0xCAFE);
 
     StarRegistry private registry;
 
@@ -63,6 +66,78 @@ contract StarRegistryTest {
 
         VM.expectRevert(StarRegistry.InvalidEnsName.selector);
         registry.createFamily("tan..starwallet.eth");
+    }
+
+    function testChildAcceptsParentProposalBeforeRegistration() public {
+        uint256 familyId = registry.createFamily("tan.starwallet.eth");
+        bytes32 registrationId =
+            registry.proposeChildRegistration(familyId, CHILD, "alice.tan.starwallet.eth");
+
+        require(registry.pendingRegistrationIdByWallet(CHILD) == registrationId, "pending");
+        StarRegistry.ChildRegistration memory proposal =
+            registry.getChildRegistration(registrationId);
+        require(proposal.familyId == familyId, "proposal family");
+        require(proposal.parent == address(this), "proposal parent");
+        require(proposal.childWallet == CHILD, "proposal child");
+
+        VM.prank(CHILD);
+        uint256 childId = registry.acceptChildRegistration(registrationId);
+        IStarRegistry.Child memory child = registry.getChild(childId);
+        require(child.familyId == familyId && child.wallet == CHILD, "registered child");
+        require(child.active, "child active");
+        require(registry.isParentOf(address(this), CHILD), "parent relationship");
+        require(registry.pendingRegistrationIdByWallet(CHILD) == bytes32(0), "pending cleared");
+    }
+
+    function testEitherParticipantCanCancelPendingRegistration() public {
+        uint256 familyId = registry.createFamily("tan.starwallet.eth");
+        bytes32 registrationId =
+            registry.proposeChildRegistration(familyId, CHILD, "alice.tan.starwallet.eth");
+
+        VM.prank(CHILD);
+        registry.cancelChildRegistration(registrationId);
+        require(registry.pendingRegistrationIdByWallet(CHILD) == bytes32(0), "child cancelled");
+
+        registrationId =
+            registry.proposeChildRegistration(familyId, CHILD, "alice.tan.starwallet.eth");
+        registry.cancelChildRegistration(registrationId);
+        require(registry.pendingRegistrationIdByWallet(CHILD) == bytes32(0), "parent cancelled");
+    }
+
+    function testOnlyParentControlsChildLifecycle() public {
+        uint256 familyId = registry.createFamily("tan.starwallet.eth");
+        bytes32 registrationId =
+            registry.proposeChildRegistration(familyId, CHILD, "alice.tan.starwallet.eth");
+        VM.prank(CHILD);
+        uint256 childId = registry.acceptChildRegistration(registrationId);
+
+        VM.prank(OTHER);
+        VM.expectPartialRevert(StarRegistry.NotFamilyParent.selector);
+        registry.setChildStatus(childId, false);
+
+        registry.setChildStatus(childId, false);
+        require(!registry.isParentOf(address(this), CHILD), "inactive child");
+        registry.setChildStatus(childId, true);
+        require(registry.isParentOf(address(this), CHILD), "active child");
+        registry.setFamilyStatus(familyId, false);
+        require(!registry.isParentOf(address(this), CHILD), "inactive family");
+    }
+
+    function testWalletCannotBeBothParentAndChild() public {
+        uint256 familyId = registry.createFamily("tan.starwallet.eth");
+
+        VM.prank(OTHER);
+        registry.createFamily("other.starwallet.eth");
+        VM.expectPartialRevert(StarRegistry.ParentWalletCannotBeChild.selector);
+        registry.proposeChildRegistration(familyId, OTHER, "bob.tan.starwallet.eth");
+
+        bytes32 registrationId =
+            registry.proposeChildRegistration(familyId, CHILD, "alice.tan.starwallet.eth");
+        VM.startPrank(CHILD);
+        registry.acceptChildRegistration(registrationId);
+        VM.expectPartialRevert(StarRegistry.ChildWalletCannotBeParent.selector);
+        registry.createFamily("alice.starwallet.eth");
+        VM.stopPrank();
     }
 
     function _namehash(string memory name) private pure returns (bytes32 node) {
