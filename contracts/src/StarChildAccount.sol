@@ -17,7 +17,8 @@ interface IQuestVault {
     function quests() external view returns (StarQuests);
 }
 
-/// @notice ERC-4337 child identity restricted to explicit protocol actions.
+/// @notice ERC-4337 v0.8 child identity authenticated by a device passkey.
+/// @dev Parent-approved device keys only access the same narrow child methods. No executor or upgrades.
 contract StarChildAccount is Account {
     StarRegistry public immutable registry;
     StarGoals public immutable goals;
@@ -28,9 +29,79 @@ contract StarChildAccount is Account {
     bytes32 public immutable publicKeyY;
     bytes32 public immutable rpIdHash;
     string public credentialId;
+    bytes32 public parentPublicKeyX;
+    bytes32 public parentPublicKeyY;
+    string public parentCredentialId;
+    uint256 public parentAuthorizationEpoch;
+    bytes4 private constant PARENT_SESSION = 0x53575031;
+    bytes32 private constant AUTHORIZATION_TYPEHASH = keccak256(
+        "StarParentAuthorization(uint256 chainId,address account,uint256 familyId,uint256 epoch,bytes32 deviceKeyX,bytes32 deviceKeyY)"
+    );
 
-    error InvalidCredential();
     error WrongRegistration();
+    error InvalidCredential();
+    error NotParent();
+    event ParentPasskeyConfigured(uint256 indexed epoch);
+    event ParentAuthorizationsRevoked(uint256 indexed epoch);
+
+    function parentAuthorizationVersion() external pure returns (uint256) {
+        return 1;
+    }
+
+    /// @notice Wallet-authenticated enrollment. A device PIN is never signing authority.
+    function configureParentPasskey(bytes32 qx, bytes32 qy, string calldata id) external {
+        _checkParent();
+        if (!P256.isValidPublicKey(qx, qy) || bytes(id).length == 0 || bytes(id).length > 1024) {
+            revert InvalidCredential();
+        }
+        parentPublicKeyX = qx;
+        parentPublicKeyY = qy;
+        parentCredentialId = id;
+        emit ParentPasskeyConfigured(++parentAuthorizationEpoch);
+    }
+
+    /// @notice Invalidates all existing device grants, without moving any funds or Stars.
+    function revokeParentAuthorizations() external {
+        _checkParent();
+        emit ParentAuthorizationsRevoked(++parentAuthorizationEpoch);
+    }
+
+    function _checkParent() private view {
+        if (registry.getFamily(familyId).parent != msg.sender) revert NotParent();
+    }
+
+    function parentAuthorizationDigest(bytes32 deviceX, bytes32 deviceY, uint256 epoch)
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                AUTHORIZATION_TYPEHASH,
+                block.chainid,
+                address(this),
+                familyId,
+                epoch,
+                deviceX,
+                deviceY
+            )
+        );
+    }
+
+    function isParentAuthorizationValid(
+        bytes32 deviceX,
+        bytes32 deviceY,
+        uint256 epoch,
+        bytes calldata proof
+    ) public view returns (bool) {
+        if (bytes(parentCredentialId).length == 0 || epoch != parentAuthorizationEpoch) return false;
+        return _verifyPasskey(
+            parentAuthorizationDigest(deviceX, deviceY, epoch),
+            proof,
+            parentPublicKeyX,
+            parentPublicKeyY
+        );
+    }
 
     constructor(
         StarRegistry registry_,
@@ -99,6 +170,73 @@ contract StarChildAccount is Account {
         goals.cancelGoalRequest(requestId);
     }
 
+    function _validateUserOp(PackedUserOperation calldata op, bytes32 hash)
+        internal
+        override
+        returns (uint256)
+    {
+        if (op.sender != address(this) || op.initCode.length != 0 || op.callData.length < 4) return 1;
+        bytes4 selector = bytes4(op.callData[:4]);
+        // Four heads, two dynamic string lengths, title <=64 bytes, reason <=480 bytes.
+        if (
+            selector == this.requestGoal.selector && op.callData.length >= 228
+                && op.callData.length <= 740
+        ) {
+            return _validateChildAuthorization(op, hash);
+        }
+        if (selector == this.submitQuest.selector && op.callData.length == 68) {
+            return _validateChildAuthorization(op, hash);
+        }
+        if (selector == this.addStarsToGoal.selector && op.callData.length == 68) {
+            return _validateChildAuthorization(op, hash);
+        }
+        if (
+            selector == this.requestStars.selector && op.callData.length >= 164
+                && op.callData.length <= 260
+        ) return _validateChildAuthorization(op, hash);
+        if (selector == this.cancelStarRequest.selector && op.callData.length == 36) {
+            return _validateChildAuthorization(op, hash);
+        }
+        if (op.callData.length != 36) return 1;
+        if (
+            selector != this.acceptRegistration.selector
+                && selector != this.requestRedemption.selector
+                && selector != this.cancelRedemption.selector
+                && selector != this.cancelGoalRequest.selector
+        ) return 1;
+        return _validateChildAuthorization(op, hash);
+    }
+
+    function _validateChildAuthorization(PackedUserOperation calldata op, bytes32 hash)
+        private
+        returns (uint256)
+    {
+        bytes calldata sig = op.signature;
+        if (sig.length >= 356 && sig.length <= 4096 && bytes4(sig[:4]) == PARENT_SESSION) {
+            // Fixed-width header avoids decoding attacker-controlled dynamic offsets.
+            uint256 epoch = uint256(bytes32(sig[4:36]));
+            bytes32 deviceX = bytes32(sig[36:68]);
+            bytes32 deviceY = bytes32(sig[68:100]);
+            if (!isParentAuthorizationValid(deviceX, deviceY, epoch, sig[164:])) return 1;
+            return P256.verify(
+                sha256(abi.encodePacked(hash)),
+                bytes32(sig[100:132]),
+                bytes32(sig[132:164]),
+                deviceX,
+                deviceY
+            )
+                ? 0
+                : 1;
+        }
+        // Once Papa controls this account, the original child's passkey cannot
+        // bypass revocation. Registration remains available for onboarding only.
+        if (
+            parentAuthorizationEpoch != 0
+                && bytes4(op.callData[:4]) != this.acceptRegistration.selector
+        ) return 1;
+        return super._validateUserOp(op, hash);
+    }
+
     function submitQuest(uint256 questId, bytes32 submissionId)
         external
         onlyEntryPoint
@@ -123,45 +261,18 @@ contract StarChildAccount is Account {
         return IQuestVault(vaultFactory.vaultByFamily(familyId)).quests();
     }
 
-    function _validateUserOp(PackedUserOperation calldata op, bytes32 hash)
-        internal
-        override
-        returns (uint256)
-    {
-        if (op.sender != address(this) || op.initCode.length != 0 || op.callData.length < 4) return 1;
-        bytes4 selector = bytes4(op.callData[:4]);
-        // Four heads, two dynamic string lengths, title <=64 bytes, reason <=480 bytes.
-        if (
-            selector == this.requestGoal.selector && op.callData.length >= 228
-                && op.callData.length <= 740
-        ) return super._validateUserOp(op, hash);
-        if (selector == this.submitQuest.selector && op.callData.length == 68) {
-            return super._validateUserOp(op, hash);
-        }
-        if (selector == this.addStarsToGoal.selector && op.callData.length == 68) {
-            return super._validateUserOp(op, hash);
-        }
-        if (
-            selector == this.requestStars.selector && op.callData.length >= 164
-                && op.callData.length <= 260
-        ) return super._validateUserOp(op, hash);
-        if (selector == this.cancelStarRequest.selector && op.callData.length == 36) {
-            return super._validateUserOp(op, hash);
-        }
-        if (op.callData.length != 36) return 1;
-        if (
-            selector != this.acceptRegistration.selector
-                && selector != this.requestRedemption.selector
-                && selector != this.cancelRedemption.selector
-                && selector != this.cancelGoalRequest.selector
-        ) return 1;
-        return super._validateUserOp(op, hash);
-    }
-
     function _rawSignatureValidation(bytes32 hash, bytes calldata signature)
         internal
         view
         override
+        returns (bool)
+    {
+        return _verifyPasskey(hash, signature, publicKeyX, publicKeyY);
+    }
+
+    function _verifyPasskey(bytes32 hash, bytes calldata signature, bytes32 qx, bytes32 qy)
+        private
+        view
         returns (bool)
     {
         if (signature.length > 4096) return false;
@@ -170,6 +281,6 @@ contract StarChildAccount is Account {
             !decoded || auth.authenticatorData.length < 37
                 || bytes32(auth.authenticatorData[:32]) != rpIdHash
         ) return false;
-        return WebAuthn.verify(abi.encodePacked(hash), auth, publicKeyX, publicKeyY, true);
+        return WebAuthn.verify(abi.encodePacked(hash), auth, qx, qy, true);
     }
 }

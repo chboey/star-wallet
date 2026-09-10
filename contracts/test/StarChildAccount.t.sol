@@ -11,6 +11,8 @@ import { PackedUserOperation } from "@openzeppelin/contracts/interfaces/draft-IE
 import { Base64 } from "@openzeppelin/contracts/utils/Base64.sol";
 
 interface ChildAccountVm {
+    function warp(uint256 timestamp) external;
+    function chainId(uint256 id) external;
     function prank(address sender) external;
     function expectRevert() external;
     function signP256(uint256 key, bytes32 digest) external pure returns (bytes32 r, bytes32 s);
@@ -225,6 +227,118 @@ contract StarChildAccountTest {
         require(_register() != 0, "bound registration failed");
     }
 
+    function testParentGrantPersistsAndRevocationRequiresFreshApproval() public {
+        _enrollParent();
+        bytes memory callData =
+            abi.encodeCall(account.requestStars, (10, "Please", bytes32(uint256(1))));
+        bytes32 hash = keccak256("parent-authorized operation");
+        PackedUserOperation memory op = _parentOperation(callData, hash, 1);
+
+        require(_validate(op, hash) == 0, "parent grant rejected");
+        VM.warp(block.timestamp + 3650 days);
+        require(_validate(op, hash) == 0, "hidden expiry introduced");
+        require(_validate(op, keccak256("different operation")) == 1, "operation replay");
+
+        account.revokeParentAuthorizations();
+        require(account.parentAuthorizationEpoch() == 2, "epoch not incremented");
+        require(_validate(op, hash) == 1, "revoked grant accepted");
+        op = _parentOperation(callData, hash, 2);
+        require(_validate(op, hash) == 0, "fresh approval rejected");
+
+        op = _signedOperation(callData, hash);
+        require(_validate(op, hash) == 1, "child key bypassed parent control");
+    }
+
+    function testParentAuthorizedDeviceCanSubmitRequestWithoutMovingFunds() public {
+        uint256 childId = _register();
+        _enrollParent();
+        bytes memory callData =
+            abi.encodeCall(account.requestStars, (10, "Please add Stars", bytes32(uint256(7))));
+        bytes32 hash = keccak256("real child request");
+        PackedUserOperation memory op = _parentOperation(callData, hash, 1);
+        require(_validate(op, hash) == 0, "device grant rejected");
+
+        VM.prank(ENTRY_POINT);
+        (bool success,) = address(account).call(callData);
+        require(success, "request failed");
+        require(questVault.quests().getRequest(1).childId == childId, "wrong child");
+        require(questVault.quests().getRequest(1).stars == 10, "wrong request");
+        require(token.balanceOf(address(account)) == 0, "request moved Stars");
+    }
+
+    function testFuzzMalformedParentGrantsCannotAuthorize(bytes calldata malformed) public {
+        _enrollParent();
+        PackedUserOperation memory op;
+        op.sender = address(account);
+        op.callData = abi.encodeCall(account.cancelStarRequest, (1));
+        op.signature = abi.encodePacked(bytes4(0x53575031), malformed);
+        require(_validate(op, keccak256("fuzz operation")) == 1, "malformed grant accepted");
+    }
+
+    function testOnlyRegisteredParentCanEnrollRotateOrRevoke() public {
+        (uint256 qx, uint256 qy) = VM.publicKeyP256(CHILD_KEY + 1);
+        VM.prank(address(0xBAD));
+        VM.expectRevert();
+        account.configureParentPasskey(bytes32(qx), bytes32(qy), "parent");
+
+        _enrollParent();
+        require(account.parentAuthorizationEpoch() == 1, "enrollment epoch");
+        VM.prank(address(0xBAD));
+        VM.expectRevert();
+        account.revokeParentAuthorizations();
+        VM.expectRevert();
+        account.configureParentPasskey(bytes32(0), bytes32(0), "invalid");
+
+        _enrollParent();
+        require(account.parentAuthorizationEpoch() == 2, "rotation epoch");
+    }
+
+    function testParentGrantBindsParentDeviceNetworkAccountAndAllowedCall() public {
+        _enrollParent();
+        bytes memory request =
+            abi.encodeCall(account.requestStars, (10, "Please", bytes32(uint256(1))));
+        bytes32 hash = keccak256("scoped operation");
+
+        PackedUserOperation memory op;
+        op.sender = address(account);
+        op.callData = request;
+        op.signature = _sessionSignature(hash, CHILD_KEY, CHILD_KEY + 2, 1);
+        require(_validate(op, hash) == 1, "child key accepted as parent");
+
+        op.signature = _sessionSignature(hash, CHILD_KEY + 1, CHILD_KEY + 2, 1);
+        op.signature[120] = bytes1(uint8(op.signature[120]) ^ 1);
+        require(_validate(op, hash) == 1, "invalid device signature accepted");
+
+        op = _parentOperation(request, hash, 1);
+        uint256 originalChainId = block.chainid;
+        VM.chainId(originalChainId + 1);
+        require(_validate(op, hash) == 1, "cross-chain grant accepted");
+        VM.chainId(originalChainId);
+
+        op.callData = abi.encodeCall(account.revokeParentAuthorizations, ());
+        require(_validate(op, hash) == 1, "device revoked parent grants");
+        op.callData = abi.encodeWithSignature("withdrawSavings(uint256,address)", 1, address(this));
+        require(_validate(op, hash) == 1, "financial call allowed");
+
+        StarChildAccount other = new StarChildAccount(
+            registry,
+            goals,
+            familyId,
+            keccak256("other"),
+            publicKeyX,
+            publicKeyY,
+            sha256("localhost"),
+            "other-child",
+            IQuestVaultFactory(address(this))
+        );
+        other.configureParentPasskey(
+            account.parentPublicKeyX(), account.parentPublicKeyY(), "same-parent"
+        );
+        op = _parentOperation(request, hash, 1);
+        op.sender = address(other);
+        require(_validateAccount(other, op, hash) == 1, "cross-account grant accepted");
+    }
+
     function testRejectsInvalidCredentialConfiguration() public {
         string memory oversizedCredential = new string(1025);
         require(!_canDeploy(bytes32(0), bytes32(0), "invalid"), "invalid key");
@@ -250,6 +364,39 @@ contract StarChildAccountTest {
         }
     }
 
+    function _enrollParent() private {
+        (uint256 qx, uint256 qy) = VM.publicKeyP256(CHILD_KEY + 1);
+        account.configureParentPasskey(bytes32(qx), bytes32(qy), "parent-credential");
+    }
+
+    function _parentOperation(bytes memory callData, bytes32 hash, uint256 epoch)
+        private
+        view
+        returns (PackedUserOperation memory op)
+    {
+        op.sender = address(account);
+        op.callData = callData;
+        op.signature = _sessionSignature(hash, CHILD_KEY + 1, CHILD_KEY + 2, epoch);
+    }
+
+    function _sessionSignature(bytes32 hash, uint256 parentKey, uint256 deviceKey, uint256 epoch)
+        private
+        view
+        returns (bytes memory)
+    {
+        (uint256 deviceX, uint256 deviceY) = VM.publicKeyP256(deviceKey);
+        bytes memory proof = _signature(
+            account.parentAuthorizationDigest(bytes32(deviceX), bytes32(deviceY), epoch),
+            parentKey,
+            sha256("localhost"),
+            0x05
+        );
+        (bytes32 r, bytes32 s) = VM.signP256(deviceKey, sha256(abi.encodePacked(hash)));
+        return abi.encodePacked(
+            bytes4(0x53575031), epoch, bytes32(deviceX), bytes32(deviceY), r, s, proof
+        );
+    }
+
     function _register() private returns (uint256 childId) {
         bytes32 registration =
             registry.proposeChildRegistration(familyId, address(account), CHILD_NAME);
@@ -268,8 +415,15 @@ contract StarChildAccountTest {
     }
 
     function _validate(PackedUserOperation memory op, bytes32 hash) private returns (uint256) {
+        return _validateAccount(account, op, hash);
+    }
+
+    function _validateAccount(StarChildAccount target, PackedUserOperation memory op, bytes32 hash)
+        private
+        returns (uint256)
+    {
         VM.prank(ENTRY_POINT);
-        return account.validateUserOp(op, hash, 0);
+        return target.validateUserOp(op, hash, 0);
     }
 
     function _signature(bytes32 hash, uint256 key, bytes32 rpHash, bytes1 flags)
