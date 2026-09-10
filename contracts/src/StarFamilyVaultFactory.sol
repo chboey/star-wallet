@@ -17,6 +17,7 @@ contract StarFamilyVaultFactory {
     address public immutable weth;
     address public immutable aqua;
     address public immutable swapVmApp;
+    address public immutable emergencyAdmin;
     address public immutable ethUsdFeed;
     address public immutable usdcUsdFeed;
     uint32 public immutable ethUsdMaxAgeSeconds;
@@ -36,7 +37,10 @@ contract StarFamilyVaultFactory {
     error FamilyVaultAlreadyExists(uint256 familyId, address vault);
 
     event FamilyVaultCreated(
-        uint256 indexed familyId, address indexed parent, address indexed vault
+        uint256 indexed familyId,
+        address indexed parent,
+        address indexed vault,
+        address emergencyAdmin
     );
 
     constructor(
@@ -46,13 +50,14 @@ contract StarFamilyVaultFactory {
         address wethAddress,
         address aquaAddress,
         address swapVmAddress,
+        address emergencyAdminAddress,
         StarFamilyVault.AquaSafetyConfig memory safety
     ) {
         if (
             registryAddress == address(0) || starAddress == address(0) || usdcAddress == address(0)
                 || wethAddress == address(0) || aquaAddress == address(0)
-                || swapVmAddress == address(0) || safety.ethUsdFeed == address(0)
-                || safety.usdcUsdFeed == address(0)
+                || swapVmAddress == address(0) || emergencyAdminAddress == address(0)
+                || safety.ethUsdFeed == address(0) || safety.usdcUsdFeed == address(0)
         ) revert ZeroAddress();
         if (
             safety.ethUsdMaxAgeSeconds == 0 || safety.usdcUsdMaxAgeSeconds == 0
@@ -71,6 +76,7 @@ contract StarFamilyVaultFactory {
         weth = wethAddress;
         aqua = aquaAddress;
         swapVmApp = swapVmAddress;
+        emergencyAdmin = emergencyAdminAddress;
         ethUsdFeed = safety.ethUsdFeed;
         usdcUsdFeed = safety.usdcUsdFeed;
         ethUsdMaxAgeSeconds = safety.ethUsdMaxAgeSeconds;
@@ -98,6 +104,7 @@ contract StarFamilyVaultFactory {
             address(star),
             aqua,
             swapVmApp,
+            emergencyAdmin,
             StarFamilyVault.AquaSafetyConfig({
                 ethUsdFeed: ethUsdFeed,
                 usdcUsdFeed: usdcUsdFeed,
@@ -114,6 +121,6 @@ contract StarFamilyVaultFactory {
         familyIdByVault[vaultAddress] = familyId;
         star.grantRole(star.MINTER_ROLE(), vaultAddress);
 
-        emit FamilyVaultCreated(familyId, msg.sender, vaultAddress);
+        emit FamilyVaultCreated(familyId, msg.sender, vaultAddress, emergencyAdmin);
     }
 }

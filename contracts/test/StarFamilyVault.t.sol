@@ -113,9 +113,8 @@ contract MockVaultFeed is IChainlinkAggregatorV3 {
     }
 
     contract StarFamilyVaultTest {
-        VaultVm private constant VM = VaultVm(
-            address(uint160(uint256(keccak256("hevm cheat code"))))
-        );
+        VaultVm private constant VM =
+            VaultVm(address(uint160(uint256(keccak256("hevm cheat code")))));
         address private constant CHILD = address(0xCAFE);
         address private constant RECIPIENT = address(0xBEEF);
         address private constant OTHER = address(0xBAD);
@@ -158,6 +157,7 @@ contract MockVaultFeed is IChainlinkAggregatorV3 {
                 address(star),
                 address(aqua),
                 SWAP_VM,
+                address(this),
                 _safety()
             );
             star.grantRole(star.VAULT_FACTORY_ROLE(), address(this));
@@ -329,9 +329,8 @@ contract MockVaultFeed is IChainlinkAggregatorV3 {
         function testRejectsInvalidFeeSaltPriceRangeAndDeadline() public {
             bytes memory invalidFee = _strategy(1_001, 1, uint40(block.timestamp + 900));
             bytes memory invalidSalt = _strategy(30, 0, uint40(block.timestamp + 900));
-            bytes memory invalidRange = _strategyWithRange(
-                30, 1, uint40(block.timestamp + 900), 2, 1
-            );
+            bytes memory invalidRange =
+                _strategyWithRange(30, 1, uint40(block.timestamp + 900), 2, 1);
             bytes memory tooShort = _strategy(30, 1, uint40(block.timestamp + 59));
             bytes memory tooLong = _strategy(30, 1, uint40(block.timestamp + 1_801));
 
@@ -377,6 +376,59 @@ contract MockVaultFeed is IChainlinkAggregatorV3 {
             vault.shipSavingsPosition(strategy, 100_000_001, 1);
             VM.expectPartialRevert(StarFamilyVault.PositionWethLimitExceeded.selector);
             vault.shipSavingsPosition(strategy, 1, 10 ether + 1);
+        }
+
+        function testEmergencyPauseRevokesAllowancesAndRequiresDockBeforeResume() public {
+            vault.rewardStars(childId, 10, "Fund emergency test");
+            vault.fundStrategyWeth(1 ether);
+            bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
+            vault.shipSavingsPosition(strategy, 4_000_000, 0.5 ether);
+            bytes memory replacement = _strategy(30, 2, uint40(block.timestamp + 900));
+
+            vault.setAquaPaused(true);
+            require(vault.aquaPaused(), "not paused");
+            require(usdc.allowance(address(vault), address(aqua)) == 0, "USDC allowance");
+            require(weth.allowance(address(vault), address(aqua)) == 0, "WETH allowance");
+
+            VM.expectPartialRevert(StarFamilyVault.AquaOperationsPaused.selector);
+            vault.replaceSavingsPosition(replacement, 4_000_000, 0.5 ether);
+            VM.expectPartialRevert(StarFamilyVault.PositionMustBeDockedBeforeUnpause.selector);
+            vault.setAquaPaused(false);
+
+            vault.emergencyDockSavingsPosition();
+            require(!vault.getFamilyAccount().positionActive, "position not docked");
+            vault.setAquaPaused(false);
+            require(!vault.aquaPaused(), "not resumed");
+            require(
+                usdc.allowance(address(vault), address(aqua)) == type(uint256).max,
+                "USDC allowance not restored"
+            );
+            require(
+                weth.allowance(address(vault), address(aqua)) == type(uint256).max,
+                "WETH allowance not restored"
+            );
+        }
+
+        function testPauseAndEmergencyDockRequireEmergencyAdmin() public {
+            VM.prank(OTHER);
+            VM.expectPartialRevert(StarFamilyVault.NotEmergencyAdmin.selector);
+            vault.setAquaPaused(true);
+
+            VM.expectRevert(StarFamilyVault.AquaOperationsNotPaused.selector);
+            vault.emergencyDockSavingsPosition();
+        }
+
+        function testParentCanDockWhilePausedAndFamilyInactive() public {
+            vault.rewardStars(childId, 10, "Fund safe exit test");
+            vault.fundStrategyWeth(1 ether);
+            vault.shipSavingsPosition(
+                _strategy(30, 1, uint40(block.timestamp + 900)), 4_000_000, 0.5 ether
+            );
+            vault.setAquaPaused(true);
+            registry.setFamilyStatus(familyId, false);
+
+            vault.dockSavingsPosition();
+            require(!vault.getFamilyAccount().positionActive, "parent exit blocked");
         }
 
         function testCannotReuseDockedStrategyHash() public {

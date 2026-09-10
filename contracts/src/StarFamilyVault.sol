@@ -86,6 +86,7 @@ contract StarFamilyVault is ReentrancyGuard {
     IStarToken public immutable star;
     IAqua public immutable aqua;
     address public immutable swapVmApp;
+    address public immutable emergencyAdmin;
     IChainlinkAggregatorV3 public immutable ethUsdFeed;
     IChainlinkAggregatorV3 public immutable usdcUsdFeed;
     uint8 public immutable ethUsdFeedDecimals;
@@ -96,6 +97,7 @@ contract StarFamilyVault is ReentrancyGuard {
     uint40 public immutable maxStrategyLifetimeSeconds;
     uint256 public immutable maxPositionUsdc;
     uint256 public immutable maxPositionWeth;
+    bool public aquaPaused;
     uint256 public nextRewardId = 1;
 
     FamilyAccount private familyAccount;
@@ -136,6 +138,11 @@ contract StarFamilyVault is ReentrancyGuard {
     error InvalidStrategyTraits(uint256 expected, uint256 actual);
     error StrategyHashAlreadyUsed(bytes32 strategyHash);
     error StrategyHashMismatch(bytes32 expected, bytes32 actual);
+    error NotEmergencyAdmin(address account);
+    error AquaOperationsPaused();
+    error AquaOperationsNotPaused();
+    error AquaPauseStateUnchanged(bool paused);
+    error PositionMustBeDockedBeforeUnpause(bytes32 strategyHash);
     error InvalidSafetyConfiguration();
     error InvalidTokenOrder(address tokenLt, address tokenGt);
     error InvalidOracleDecimals(address feed, uint8 decimals);
@@ -178,6 +185,7 @@ contract StarFamilyVault is ReentrancyGuard {
         uint40 deadline,
         uint256 oracleRawPrice
     );
+    event AquaPauseUpdated(address indexed emergencyAdmin, bool paused);
 
     constructor(
         uint256 familyId_,
@@ -187,14 +195,15 @@ contract StarFamilyVault is ReentrancyGuard {
         address starAddress,
         address aquaAddress,
         address swapVmAddress,
+        address emergencyAdminAddress,
         AquaSafetyConfig memory safety
     ) {
         if (familyId_ == 0) revert InvalidFamilyId();
         if (
             usdcAddress == address(0) || wethAddress == address(0) || registryAddress == address(0)
                 || starAddress == address(0) || aquaAddress == address(0)
-                || swapVmAddress == address(0) || safety.ethUsdFeed == address(0)
-                || safety.usdcUsdFeed == address(0)
+                || swapVmAddress == address(0) || emergencyAdminAddress == address(0)
+                || safety.ethUsdFeed == address(0) || safety.usdcUsdFeed == address(0)
         ) revert ZeroAddress();
         IStarRegistry(registryAddress).getFamily(familyId_);
         uint8 usdcDecimals = IERC20Metadata(usdcAddress).decimals();
@@ -229,6 +238,7 @@ contract StarFamilyVault is ReentrancyGuard {
         star = IStarToken(starAddress);
         aqua = IAqua(aquaAddress);
         swapVmApp = swapVmAddress;
+        emergencyAdmin = emergencyAdminAddress;
         ethUsdFeed = IChainlinkAggregatorV3(safety.ethUsdFeed);
         usdcUsdFeed = IChainlinkAggregatorV3(safety.usdcUsdFeed);
         ethUsdFeedDecimals = ethFeedDecimals;
@@ -242,6 +252,7 @@ contract StarFamilyVault is ReentrancyGuard {
 
         IERC20(usdcAddress).forceApprove(aquaAddress, type(uint256).max);
         IERC20(wethAddress).forceApprove(aquaAddress, type(uint256).max);
+        emit AquaPauseUpdated(emergencyAdminAddress, false);
     }
 
     function rewardStars(uint256 childId, uint256 amount, string calldata reason)
@@ -316,6 +327,7 @@ contract StarFamilyVault is ReentrancyGuard {
         returns (bytes32 strategyHash)
     {
         _requireActiveParent(msg.sender);
+        _requireAquaActive();
         return _shipSavingsPosition(strategy, usdcAmount, wethAmount);
     }
 
@@ -325,12 +337,33 @@ contract StarFamilyVault is ReentrancyGuard {
         returns (bytes32 oldStrategyHash, bytes32 newStrategyHash)
     {
         _requireActiveParent(msg.sender);
+        _requireAquaActive();
         oldStrategyHash = _dockSavingsPosition();
         newStrategyHash = _shipSavingsPosition(strategy, usdcAmount, wethAmount);
     }
 
     function dockSavingsPosition() external nonReentrant {
         _requireParent(msg.sender);
+        _dockSavingsPosition();
+    }
+
+    function setAquaPaused(bool paused) external nonReentrant {
+        if (msg.sender != emergencyAdmin) revert NotEmergencyAdmin(msg.sender);
+        if (aquaPaused == paused) revert AquaPauseStateUnchanged(paused);
+        if (!paused && familyAccount.positionActive) {
+            revert PositionMustBeDockedBeforeUnpause(familyAccount.strategyHash);
+        }
+
+        aquaPaused = paused;
+        uint256 allowance = paused ? 0 : type(uint256).max;
+        usdc.forceApprove(address(aqua), allowance);
+        weth.forceApprove(address(aqua), allowance);
+        emit AquaPauseUpdated(msg.sender, paused);
+    }
+
+    function emergencyDockSavingsPosition() external nonReentrant {
+        if (msg.sender != emergencyAdmin) revert NotEmergencyAdmin(msg.sender);
+        if (!aquaPaused) revert AquaOperationsNotPaused();
         _dockSavingsPosition();
     }
 
@@ -624,6 +657,10 @@ contract StarFamilyVault is ReentrancyGuard {
         _requireParent(account);
         IStarRegistry.Family memory family = registry.getFamily(familyId);
         if (!family.active) revert FamilyInactive(familyId);
+    }
+
+    function _requireAquaActive() private view {
+        if (aquaPaused) revert AquaOperationsPaused();
     }
 
     function _positionTokens() private view returns (address[] memory tokens) {
