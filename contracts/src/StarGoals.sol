@@ -37,10 +37,25 @@ contract StarGoals {
         uint64 resolvedAt;
     }
 
+    // Icon IDs are stable UI metadata: bicycle, toy, books, art, game, other, rocket.
+    struct GoalRequest {
+        uint256 id;
+        uint256 childId;
+        string title;
+        string reason;
+        uint8 icon;
+        RedemptionStatus status;
+        uint256 goalId;
+        uint64 requestedAt;
+        uint64 resolvedAt;
+    }
+
     IStarRegistry public immutable registry;
     IStarToken public immutable star;
     uint256 public nextGoalId = 1;
     uint256 public nextRedemptionId = 1;
+    uint256 public nextGoalRequestId = 1;
+    uint256 public constant goalRequestsVersion = 1;
     uint256 public constant goalContributionsVersion = 1;
 
     mapping(uint256 goalId => Goal goal) private goals;
@@ -49,6 +64,9 @@ contract StarGoals {
     // Stars remain in the child's non-transferable balance, reserved per goal.
     mapping(uint256 goalId => uint256 amount) public allocatedStars;
     mapping(uint256 goalId => uint256 redemptionId) public pendingRedemptionForGoal;
+    mapping(uint256 requestId => GoalRequest request) private goalRequests;
+    mapping(address child => mapping(bytes32 submissionId => bool used)) public
+        usedGoalSubmissionIds;
 
     error ZeroAddress();
     error InvalidTitle();
@@ -65,6 +83,9 @@ contract StarGoals {
     error InsufficientAvailableStars(uint256 available, uint256 required);
     error InvalidContribution();
     error GoalNotFunded(uint256 allocated, uint256 required);
+    error InvalidGoalRequest();
+    error GoalRequestNotPending(uint256 requestId);
+    error GoalSubmissionAlreadyUsed();
 
     event GoalCreated(
         uint256 indexed goalId, uint256 indexed childId, uint256 starCost, string title
@@ -83,6 +104,17 @@ contract StarGoals {
     event RedemptionApproved(uint256 indexed redemptionId, uint256 indexed goalId);
     event RedemptionRejected(uint256 indexed redemptionId, uint256 indexed goalId);
     event RedemptionCancelled(uint256 indexed redemptionId, uint256 indexed goalId);
+    event GoalRequested(
+        uint256 indexed requestId,
+        uint256 indexed childId,
+        string title,
+        string reason,
+        uint8 icon,
+        bytes32 submissionId
+    );
+    event GoalRequestApproved(uint256 indexed requestId, uint256 indexed goalId);
+    event GoalRequestRejected(uint256 indexed requestId);
+    event GoalRequestCancelled(uint256 indexed requestId);
 
     constructor(address registryAddress, address starAddress) {
         if (registryAddress == address(0) || starAddress == address(0)) revert ZeroAddress();
@@ -92,6 +124,94 @@ contract StarGoals {
 
     function createGoal(uint256 childId, string calldata title, uint256 starCost)
         external
+        returns (uint256 goalId)
+    {
+        return _createGoal(childId, title, starCost);
+    }
+
+    function requestGoal(
+        uint256 childId,
+        string calldata title,
+        string calldata reason,
+        uint8 icon,
+        bytes32 submissionId
+    ) external returns (uint256 requestId) {
+        IStarRegistry.Child memory child = registry.getChild(childId);
+        if (msg.sender != child.wallet) revert NotChildWallet(childId, msg.sender);
+        _requireFamilyActive(child.familyId);
+        if (!child.active) revert ChildInactive(childId);
+        if (
+            bytes(title).length == 0 || bytes(title).length > 64 || bytes(reason).length > 480
+                || icon > 6 || submissionId == bytes32(0)
+        ) {
+            revert InvalidGoalRequest();
+        }
+        if (usedGoalSubmissionIds[msg.sender][submissionId]) revert GoalSubmissionAlreadyUsed();
+        usedGoalSubmissionIds[msg.sender][submissionId] = true;
+        requestId = nextGoalRequestId++;
+        goalRequests[requestId] = GoalRequest({
+            id: requestId,
+            childId: childId,
+            title: title,
+            reason: reason,
+            icon: icon,
+            status: RedemptionStatus.Pending,
+            goalId: 0,
+            requestedAt: uint64(block.timestamp),
+            resolvedAt: 0
+        });
+        emit GoalRequested(requestId, childId, title, reason, icon, submissionId);
+    }
+
+    function approveGoalRequest(uint256 requestId, uint256 starCost)
+        external
+        returns (uint256 goalId)
+    {
+        GoalRequest storage request = _pendingGoalRequest(requestId);
+        // _createGoal authenticates the registered parent and checks family/child activity.
+        goalId = _createGoal(request.childId, request.title, starCost);
+        request.status = RedemptionStatus.Approved;
+        request.goalId = goalId;
+        request.resolvedAt = uint64(block.timestamp);
+        emit GoalRequestApproved(requestId, goalId);
+    }
+
+    function rejectGoalRequest(uint256 requestId) external {
+        GoalRequest storage request = _pendingGoalRequest(requestId);
+        _requireParent(registry.getChild(request.childId).familyId, msg.sender);
+        request.status = RedemptionStatus.Rejected;
+        request.resolvedAt = uint64(block.timestamp);
+        emit GoalRequestRejected(requestId);
+    }
+
+    function cancelGoalRequest(uint256 requestId) external {
+        GoalRequest storage request = _pendingGoalRequest(requestId);
+        if (msg.sender != registry.getChild(request.childId).wallet) {
+            revert NotChildWallet(request.childId, msg.sender);
+        }
+        request.status = RedemptionStatus.Cancelled;
+        request.resolvedAt = uint64(block.timestamp);
+        emit GoalRequestCancelled(requestId);
+    }
+
+    function getGoalRequest(uint256 requestId) external view returns (GoalRequest memory) {
+        if (goalRequests[requestId].id == 0) revert InvalidGoalRequest();
+        return goalRequests[requestId];
+    }
+
+    function _pendingGoalRequest(uint256 requestId)
+        private
+        view
+        returns (GoalRequest storage request)
+    {
+        request = goalRequests[requestId];
+        if (request.id == 0 || request.status != RedemptionStatus.Pending) {
+            revert GoalRequestNotPending(requestId);
+        }
+    }
+
+    function _createGoal(uint256 childId, string memory title, uint256 starCost)
+        private
         returns (uint256 goalId)
     {
         IStarRegistry.Child memory child = registry.getChild(childId);
