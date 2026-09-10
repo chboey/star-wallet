@@ -41,10 +41,13 @@ contract StarGoals {
     IStarToken public immutable star;
     uint256 public nextGoalId = 1;
     uint256 public nextRedemptionId = 1;
+    uint256 public constant goalContributionsVersion = 1;
 
     mapping(uint256 goalId => Goal goal) private goals;
     mapping(uint256 redemptionId => Redemption redemption) private redemptions;
     mapping(uint256 childId => uint256 amount) public reservedStars;
+    // Stars remain in the child's non-transferable balance, reserved per goal.
+    mapping(uint256 goalId => uint256 amount) public allocatedStars;
     mapping(uint256 goalId => uint256 redemptionId) public pendingRedemptionForGoal;
 
     error ZeroAddress();
@@ -60,12 +63,17 @@ contract StarGoals {
     error InvalidRedemptionStatus(uint256 redemptionId, RedemptionStatus status);
     error PendingRedemptionExists(uint256 goalId, uint256 redemptionId);
     error InsufficientAvailableStars(uint256 available, uint256 required);
+    error InvalidContribution();
+    error GoalNotFunded(uint256 allocated, uint256 required);
 
     event GoalCreated(
         uint256 indexed goalId, uint256 indexed childId, uint256 starCost, string title
     );
     event GoalCancelled(uint256 indexed goalId, uint256 indexed childId);
     event GoalCompleted(uint256 indexed goalId, uint256 indexed childId);
+    event GoalStarsAdded(
+        uint256 indexed goalId, uint256 indexed childId, uint256 amount, uint256 totalAllocated
+    );
     event RedemptionRequested(
         uint256 indexed redemptionId,
         uint256 indexed goalId,
@@ -113,7 +121,29 @@ contract StarGoals {
         uint256 pendingId = pendingRedemptionForGoal[goalId];
         if (pendingId != 0) revert PendingRedemptionExists(goalId, pendingId);
         goal.status = GoalStatus.Cancelled;
+        reservedStars[child.id] -= allocatedStars[goalId];
+        allocatedStars[goalId] = 0;
         emit GoalCancelled(goalId, goal.childId);
+    }
+
+    function addStarsToGoal(uint256 goalId, uint256 amount) external {
+        Goal storage goal = _goal(goalId);
+        if (goal.status != GoalStatus.Active) revert InvalidGoalStatus(goalId, goal.status);
+        IStarRegistry.Child memory child = registry.getChild(goal.childId);
+        if (msg.sender != child.wallet) revert NotChildWallet(child.id, msg.sender);
+        _requireFamilyActive(child.familyId);
+        if (!child.active) revert ChildInactive(child.id);
+        uint256 pendingId = pendingRedemptionForGoal[goalId];
+        if (pendingId != 0) revert PendingRedemptionExists(goalId, pendingId);
+        uint256 allocated = allocatedStars[goalId];
+        if (amount == 0 || amount > goal.starCost - allocated) revert InvalidContribution();
+        uint256 balance = star.balanceOf(child.wallet);
+        uint256 reserved = reservedStars[child.id];
+        uint256 available = balance >= reserved ? balance - reserved : 0;
+        if (amount > available) revert InsufficientAvailableStars(available, amount);
+        allocatedStars[goalId] = allocated + amount;
+        reservedStars[child.id] = reserved + amount;
+        emit GoalStarsAdded(goalId, child.id, amount, allocated + amount);
     }
 
     function requestRedemption(uint256 goalId) external returns (uint256 redemptionId) {
@@ -126,14 +156,10 @@ contract StarGoals {
         uint256 pendingId = pendingRedemptionForGoal[goalId];
         if (pendingId != 0) revert PendingRedemptionExists(goalId, pendingId);
 
-        uint256 balance = star.balanceOf(child.wallet);
-        uint256 reserved = reservedStars[child.id];
-        uint256 available = balance >= reserved ? balance - reserved : 0;
-        if (goal.starCost > available) {
-            revert InsufficientAvailableStars(available, goal.starCost);
+        if (allocatedStars[goalId] != goal.starCost) {
+            revert GoalNotFunded(allocatedStars[goalId], goal.starCost);
         }
 
-        reservedStars[child.id] = reserved + goal.starCost;
         redemptionId = nextRedemptionId++;
         redemptions[redemptionId] = Redemption({
             id: redemptionId,
@@ -158,6 +184,7 @@ contract StarGoals {
         redemption.status = RedemptionStatus.Approved;
         redemption.resolvedAt = uint64(block.timestamp);
         reservedStars[child.id] -= redemption.reservedStars;
+        allocatedStars[goal.id] = 0;
         pendingRedemptionForGoal[goal.id] = 0;
         goal.status = GoalStatus.Completed;
         star.burnFrom(child.wallet, redemption.reservedStars);
@@ -176,6 +203,7 @@ contract StarGoals {
         redemption.status = RedemptionStatus.Rejected;
         redemption.resolvedAt = uint64(block.timestamp);
         reservedStars[child.id] -= redemption.reservedStars;
+        allocatedStars[goal.id] = 0;
         pendingRedemptionForGoal[goal.id] = 0;
         emit RedemptionRejected(redemptionId, goal.id);
     }
@@ -190,6 +218,7 @@ contract StarGoals {
         redemption.status = RedemptionStatus.Cancelled;
         redemption.resolvedAt = uint64(block.timestamp);
         reservedStars[child.id] -= redemption.reservedStars;
+        allocatedStars[goal.id] = 0;
         pendingRedemptionForGoal[goal.id] = 0;
         emit RedemptionCancelled(redemptionId, goal.id);
     }
