@@ -185,6 +185,12 @@ contract StarFamilyVault is ReentrancyGuard {
         uint40 deadline,
         uint256 oracleRawPrice
     );
+    event SavingsPositionToppedUp(
+        uint256 indexed familyId,
+        bytes32 indexed strategyHash,
+        uint256 usdcAmount,
+        uint256 wethAmount
+    );
     event AquaPauseUpdated(address indexed emergencyAdmin, bool paused);
 
     constructor(
@@ -340,6 +346,61 @@ contract StarFamilyVault is ReentrancyGuard {
         _requireAquaActive();
         oldStrategyHash = _dockSavingsPosition();
         newStrategyHash = _shipSavingsPosition(strategy, usdcAmount, wethAmount);
+    }
+
+    /// @notice Capability marker; older, immutable vaults do not support this flow.
+    function savingsTopUpsVersion() external pure returns (uint256) {
+        return 1;
+    }
+
+    /// @notice Allocate idle vault funds to the same Aqua strategy. No new Stars or principal.
+    /// @dev A single token may be added. The immutable price range and deadline do not change.
+    function addToSavingsPosition(
+        bytes32 expectedStrategyHash,
+        uint256 usdcAmount,
+        uint256 wethAmount
+    ) external nonReentrant {
+        _requireActiveParent(msg.sender);
+        _requireAquaActive();
+        if (!familyAccount.positionActive) revert PositionNotActive();
+        if (expectedStrategyHash != familyAccount.strategyHash) {
+            revert StrategyHashMismatch(expectedStrategyHash, familyAccount.strategyHash);
+        }
+        if (familyAccount.positionDeadline <= block.timestamp) {
+            revert InvalidStrategyDeadline(familyAccount.positionDeadline, block.timestamp);
+        }
+        if (usdcAmount == 0 && wethAmount == 0) revert ZeroAmount();
+        _validateStrategyPrices(
+            familyAccount.positionSqrtPriceMin, familyAccount.positionSqrtPriceMax
+        );
+        if (usdcAmount > familyAccount.availableUsdc) {
+            revert InsufficientAvailableUsdc(familyAccount.availableUsdc, usdcAmount);
+        }
+        if (wethAmount > familyAccount.availableWeth) {
+            revert InsufficientAvailableWeth(familyAccount.availableWeth, wethAmount);
+        }
+        (uint256 currentUsdc, uint256 currentWeth) = aqua.safeBalances(
+            address(this), swapVmApp, expectedStrategyHash, address(usdc), address(weth)
+        );
+        // Exposure is based on current Aqua holdings, including swaps and external pushes.
+        if (currentUsdc + usdcAmount > maxPositionUsdc) {
+            revert PositionUsdcLimitExceeded(currentUsdc + usdcAmount, maxPositionUsdc);
+        }
+        if (currentWeth + wethAmount > maxPositionWeth) {
+            revert PositionWethLimitExceeded(currentWeth + wethAmount, maxPositionWeth);
+        }
+        familyAccount.availableUsdc -= usdcAmount;
+        familyAccount.availableWeth -= wethAmount;
+        // Aqua is non-custodial: transferFrom(vault, vault, amount) leaves physical holdings
+        // unchanged while increasing its virtual allocation. All pushes revert atomically.
+        if (usdcAmount != 0) {
+            aqua.push(address(this), swapVmApp, expectedStrategyHash, address(usdc), usdcAmount);
+        }
+        if (wethAmount != 0) {
+            aqua.push(address(this), swapVmApp, expectedStrategyHash, address(weth), wethAmount);
+        }
+        // Indexers debit available inventory here; Aqua's Pushed logs credit the position.
+        emit SavingsPositionToppedUp(familyId, expectedStrategyHash, usdcAmount, wethAmount);
     }
 
     function dockSavingsPosition() external nonReentrant {

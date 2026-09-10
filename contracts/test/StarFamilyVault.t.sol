@@ -63,12 +63,17 @@ contract MockVaultFeed is IChainlinkAggregatorV3 {
     }
 
     contract MockVaultAqua is IAqua {
+        address public failingPushToken;
         mapping(
             address maker
                 => mapping(
                 address app => mapping(bytes32 hash => mapping(address token => uint256))
             )
         ) public balance;
+
+        function setFailingPushToken(address token) external {
+            failingPushToken = token;
+        }
 
         function ship(
             address app,
@@ -96,6 +101,7 @@ contract MockVaultFeed is IChainlinkAggregatorV3 {
             address token,
             uint256 amount
         ) external {
+            require(token != failingPushToken, "push failed");
             balance[maker][app][strategyHash][token] += amount;
         }
 
