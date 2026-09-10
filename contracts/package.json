@@ -1,0 +1,21 @@
+{
+  "name": "@star/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "forge build --force",
+    "fmt:check": "forge fmt --check",
+    "test": "forge test"
+  },
+  "devDependencies": {
+    "@1inch/solidity-utils": "6.9.10",
+    "@openzeppelin/contracts": "5.4.0",
+    "@openzeppelin/contracts-passkeys": "npm:@openzeppelin/contracts@5.6.1",
+    "solc": "0.8.30",
+    "viem": "^2.36.0"
+  },
+  "overrides": {
+    "tmp": "^0.2.6"
+  }
+}

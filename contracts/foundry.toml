@@ -1,0 +1,23 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["node_modules"]
+solc = "0.8.30"
+via_ir = true
+optimizer = true
+optimizer_runs = 500
+evm_version = "cancun"
+chain_id = 11155111
+remappings = [
+  "@openzeppelin/=node_modules/@openzeppelin/",
+  "@1inch/solidity-utils/=node_modules/@1inch/solidity-utils/",
+  "@1inch/aqua/=vendor/1inch-aqua/",
+]
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = true
+
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
