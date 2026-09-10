@@ -78,6 +78,8 @@ contract StarFamilyVaultTest {
     address private constant CHILD = address(0xCAFE);
     address private constant RECIPIENT = address(0xBEEF);
     address private constant OTHER = address(0xBAD);
+    uint256 private constant DEFAULT_MAKER_TRAITS =
+        (uint256(1) << 254) | (uint256(0x0028002800280028) << 160);
 
     StarRegistry private registry;
     StarToken private star;
@@ -182,7 +184,7 @@ contract StarFamilyVaultTest {
     function testShipsInspectsAndDocksSavingsPosition() public {
         vault.rewardStars(childId, 10, "Finished homework");
         vault.fundStrategyWeth(2 ether);
-        bytes memory strategy = bytes("strategy-one");
+        bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
         bytes32 strategyHash = vault.shipSavingsPosition(strategy, 4_000_000, 0.75 ether);
 
         StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
@@ -206,8 +208,8 @@ contract StarFamilyVaultTest {
     function testReplacesExistingPositionAtomically() public {
         vault.rewardStars(childId, 10, "Finished homework");
         vault.fundStrategyWeth(2 ether);
-        bytes memory first = bytes("strategy-one");
-        bytes memory second = bytes("strategy-two");
+        bytes memory first = _strategy(30, 1, uint40(block.timestamp + 900));
+        bytes memory second = _strategy(30, 2, uint40(block.timestamp + 900));
         bytes32 firstHash = vault.shipSavingsPosition(first, 4_000_000, 0.75 ether);
 
         (bytes32 oldHash, bytes32 newHash) =
@@ -225,12 +227,128 @@ contract StarFamilyVaultTest {
 
         VM.expectRevert(StarFamilyVault.InvalidStrategy.selector);
         vault.shipSavingsPosition("", 1_000_000, 0.5 ether);
-        vault.shipSavingsPosition(bytes("strategy-one"), 1_000_000, 0.5 ether);
+        vault.shipSavingsPosition(
+            _strategy(30, 1, uint40(block.timestamp + 900)), 1_000_000, 0.5 ether
+        );
         VM.expectPartialRevert(StarFamilyVault.PositionAlreadyActive.selector);
-        vault.shipSavingsPosition(bytes("strategy-two"), 1_000_000, 0.5 ether);
+        vault.shipSavingsPosition(
+            _strategy(30, 2, uint40(block.timestamp + 900)), 1_000_000, 0.5 ether
+        );
 
         vault.dockSavingsPosition();
         VM.expectRevert(StarFamilyVault.PositionNotActive.selector);
         vault.currentPositionBalances();
+    }
+
+    function testInspectsCanonicalStrategyParameters() public view {
+        uint40 deadline = uint40(block.timestamp + 900);
+        StarFamilyVault.StrategyParameters memory parameters =
+            vault.inspectSavingsStrategy(_strategy(30, 77, deadline));
+
+        require(parameters.sqrtPriceMin == 1 && parameters.sqrtPriceMax == 2, "price range");
+        require(parameters.feeBps == 30, "fee");
+        require(parameters.salt == 77, "salt");
+        require(parameters.deadline == deadline, "deadline");
+    }
+
+    function testRejectsWrongMakerTraitsTokensAndProgram() public {
+        StarFamilyVault.SwapVmOrder memory order = abi.decode(
+            _strategy(30, 1, uint40(block.timestamp + 900)), (StarFamilyVault.SwapVmOrder)
+        );
+
+        order.maker = OTHER;
+        VM.expectPartialRevert(StarFamilyVault.InvalidStrategyMaker.selector);
+        vault.inspectSavingsStrategy(abi.encode(order));
+
+        order.maker = address(vault);
+        order.traits = 0;
+        VM.expectPartialRevert(StarFamilyVault.InvalidStrategyTraits.selector);
+        vault.inspectSavingsStrategy(abi.encode(order));
+
+        order.traits = vault.DEFAULT_AQUA_MAKER_TRAITS();
+        order.data[0] = order.data[0] ^ bytes1(0x01);
+        VM.expectRevert(StarFamilyVault.InvalidStrategyTokens.selector);
+        vault.inspectSavingsStrategy(abi.encode(order));
+
+        order = abi.decode(
+            _strategy(30, 1, uint40(block.timestamp + 900)), (StarFamilyVault.SwapVmOrder)
+        );
+        order.data[40] = 0x11;
+        VM.expectRevert(StarFamilyVault.InvalidStrategyProgram.selector);
+        vault.inspectSavingsStrategy(abi.encode(order));
+    }
+
+    function testRejectsInvalidFeeSaltPriceRangeAndDeadline() public {
+        VM.expectPartialRevert(StarFamilyVault.InvalidStrategyFee.selector);
+        vault.inspectSavingsStrategy(_strategy(1_001, 1, uint40(block.timestamp + 900)));
+
+        VM.expectRevert(StarFamilyVault.InvalidStrategySalt.selector);
+        vault.inspectSavingsStrategy(_strategy(30, 0, uint40(block.timestamp + 900)));
+
+        VM.expectPartialRevert(StarFamilyVault.InvalidStrategyPriceRange.selector);
+        vault.inspectSavingsStrategy(_strategyWithRange(30, 1, uint40(block.timestamp + 900), 2, 1));
+
+        VM.expectPartialRevert(StarFamilyVault.InvalidStrategyDeadline.selector);
+        vault.inspectSavingsStrategy(_strategy(30, 1, uint40(block.timestamp + 59)));
+
+        VM.expectPartialRevert(StarFamilyVault.StrategyDeadlineTooFar.selector);
+        vault.inspectSavingsStrategy(_strategy(30, 1, uint40(block.timestamp + 1 days + 1)));
+    }
+
+    function testCannotReuseDockedStrategyHash() public {
+        vault.rewardStars(childId, 2, "Finished homework");
+        vault.fundStrategyWeth(1 ether);
+        bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
+        bytes32 strategyHash = vault.shipSavingsPosition(strategy, 1_000_000, 0.5 ether);
+        vault.dockSavingsPosition();
+
+        require(vault.strategyHashUsed(strategyHash), "strategy not recorded");
+        VM.expectPartialRevert(StarFamilyVault.StrategyHashAlreadyUsed.selector);
+        vault.shipSavingsPosition(strategy, 1_000_000, 0.5 ether);
+    }
+
+    function _strategy(uint16 feeBps, uint64 salt, uint40 deadline)
+        private
+        view
+        returns (bytes memory)
+    {
+        return _strategyWithRange(feeBps, salt, deadline, 1, 2);
+    }
+
+    function _strategyWithRange(
+        uint16 feeBps,
+        uint64 salt,
+        uint40 deadline,
+        uint256 sqrtPriceMin,
+        uint256 sqrtPriceMax
+    ) private view returns (bytes memory) {
+        bytes memory program = abi.encodePacked(bytes1(0x20), bytes1(uint8(5)), deadline);
+        if (feeBps != 0) {
+            program = bytes.concat(
+                program, abi.encodePacked(bytes1(0x70), bytes1(uint8(3)), uint24(feeBps) * 1_000)
+            );
+        }
+        program = bytes.concat(
+            program,
+            abi.encodePacked(
+                bytes1(0x51),
+                bytes1(uint8(64)),
+                sqrtPriceMin,
+                sqrtPriceMax,
+                bytes1(0x02),
+                bytes1(uint8(8)),
+                salt
+            )
+        );
+        (address tokenLt, address tokenGt) = address(usdc) < address(weth)
+            ? (address(usdc), address(weth))
+            : (address(weth), address(usdc));
+        return abi.encode(
+            StarFamilyVault.SwapVmOrder({
+                maker: address(vault),
+                traits: DEFAULT_MAKER_TRAITS,
+                data: bytes.concat(bytes20(tokenLt), bytes20(tokenGt), program)
+            })
+        );
     }
 }
