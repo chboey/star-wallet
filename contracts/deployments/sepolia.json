@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 5,
+  "architecture": "one-family-one-vault",
+  "generatedAt": "2026-09-10T15:26:55.170Z",
+  "network": "sepolia",
+  "chainId": 11155111,
+  "compilerVersion": "0.8.30+commit.73712a01.Emscripten.clang",
+  "optimizer": {
+    "enabled": true,
+    "runs": 500
+  },
+  "evmVersion": "cancun",
+  "deployer": "0x166030C9c3dC2609055d129be1eeE3E18bAEFe00",
+  "tokenAdmin": "0x166030C9c3dC2609055d129be1eeE3E18bAEFe00",
+  "emergencyAdmin": "0x166030C9c3dC2609055d129be1eeE3E18bAEFe00",
+  "dependencies": {
+    "usdc": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    "weth": "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+    "aqua": "0x38C8c7073cEc4153fA090f819528E69a857f3D90",
+    "swapVm": "0x2b893B0B15D71E735BB975daF8ffe26CEC449629"
+  },
+  "dependencyRuntimeCodeHashes": {
+    "aqua": "0x371f2cf0cf5ad231b80107ae85decb18555f997b613030fc55cd458110e502cf",
+    "swapVm": "0xd62800eebe19bf048af1d70bbf00aead9d4b030fa1d2aff46c5bbe68e0248061"
+  },
+  "aquaSafety": {
+    "ethUsdFeed": "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+    "usdcUsdFeed": "0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E",
+    "ethUsdMaxAgeSeconds": 3600,
+    "usdcUsdMaxAgeSeconds": 90000,
+    "maxStrategyPriceDeviationBps": 1000,
+    "maxStrategyLifetimeSeconds": 1800,
+    "maxPositionUsdc": "1000000000",
+    "maxPositionWeth": "500000000000000000"
+  },
+  "contracts": {
+    "Aqua": {
+      "address": "0x38c8c7073cec4153fa090f819528e69a857f3d90",
+      "sourceName": "@1inch/aqua/src/Aqua.sol",
+      "constructorArguments": [],
+      "blockNumber": "11675793",
+      "transactionHash": "0x0030036af94698230eb91f087f79d2c67a4cbe0f47e9febc12a3a0b625645355",
+      "runtimeCodeHash": "0x371f2cf0cf5ad231b80107ae85decb18555f997b613030fc55cd458110e502cf"
+    },
+    "AquaSwapVMRouter": {
+      "address": "0x2b893b0b15d71e735bb975daf8ffe26cec449629",
+      "sourceName": "vendor/1inch-swap-vm/src/routers/AquaSwapVMRouter.sol",
+      "constructorArguments": [
+        "0x38c8c7073cec4153fa090f819528e69a857f3d90",
+        "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+        "0x166030C9c3dC2609055d129be1eeE3E18bAEFe00",
+        "SwapVM",
+        "1"
+      ],
+      "blockNumber": "11675794",
+      "transactionHash": "0xd418c55bfdbea97b02c87ff67e17daf19e46b6e56b67e7c052b4488d29a3ae2a",
+      "runtimeCodeHash": "0xd62800eebe19bf048af1d70bbf00aead9d4b030fa1d2aff46c5bbe68e0248061"
+    },
+    "StarEnsRegistrar": {
+      "address": "0x1ef70c3f89e5cf457edb28c08a28010b7dfe5444",
+      "transactionHash": "0xb0d898ecad9e30facd79fe1d1afb62e7ecf1027601021cf228f7e2747adde66d",
+      "blockNumber": "11675800",
+      "sourceName": "src/StarEnsRegistrar.sol",
+      "constructorArguments": [
+        "0xbdc85dd5b15d7ecb354cd7cb6f2c50b4f2c4f0e2",
+        "starwallet",
+        "0x10dc6333cdfe1fcef624c6e0a8221b91804cd7ef",
+        "0x624a25d67b59d587752ebec8dded8827dae52050",
+        "0x9eae5c2730a7dd16bdd1dee6421a1b91e3b0365e"
+      ],
+      "runtimeCodeHash": "0x2fcf243c47933a974551d0613b256511ce488ce69ec6536f1d141046e52d8c28"
+    },
+    "StarChildAccountFactory": {
+      "address": "0xe5b5db333d57ef6652cb5752875a7aa3acf05630",
+      "transactionHash": "0x7f34762edbfd7152fd75db1634943b05b81be72b0b49aaaaa84a60399d2c2798",
+      "blockNumber": "11675799",
+      "sourceName": "src/StarChildAccountFactory.sol",
+      "constructorArguments": [
+        "0x23920ff112b125bad86e2e29b8986c4b29815886",
+        "0x5b590d77cabee4ac8692a071b303095304c28416",
+        "star-frontend-mu.vercel.app",
+        "0x9849e859c38f4c28a900ec066472ce78e2b29567"
+      ],
+      "runtimeCodeHash": "0xd54cfbb4fe41ae054ffcbc1d777158dae43685209d6d89ace3c1e78325a897fb"
+    },
+    "StarRegistry": {
+      "address": "0x23920ff112b125bad86e2e29b8986c4b29815886",
+      "transactionHash": "0x1fcd91aa1ee84b33e6d69585c9ca865cd35d7ea30a4cb3cc86678628224e935e",
+      "blockNumber": "11675795",
+      "sourceName": "src/StarRegistry.sol",
+      "constructorArguments": [],
+      "runtimeCodeHash": "0xbb324dd12c67ae717105915c2a7672fcd9e6b2df3bcff1c6291ad32908564a9b"
+    },
+    "StarToken": {
+      "address": "0x5d5b0b72ea18aada8706412885ef64b53a2026fe",
+      "transactionHash": "0x92cd57845ddd3a3bec200fec14a709ed0ec12645d59fc967ec18068be70f76d1",
+      "blockNumber": "11675796",
+      "sourceName": "src/StarToken.sol",
+      "constructorArguments": [
+        "0x166030C9c3dC2609055d129be1eeE3E18bAEFe00"
+      ],
+      "runtimeCodeHash": "0x771bea2c274c5a26e1499e62ffcb8806131879cf0f21ffc966dba10c712a79d3"
+    },
+    "StarGoals": {
+      "address": "0x5b590d77cabee4ac8692a071b303095304c28416",
+      "transactionHash": "0xea4fcd79e17f5d9c3b6054982898bf572f076324db93d49a9605e3eadaf929e6",
+      "blockNumber": "11675797",
+      "sourceName": "src/StarGoals.sol",
+      "constructorArguments": [
+        "0x23920ff112b125bad86e2e29b8986c4b29815886",
+        "0x5d5b0b72ea18aada8706412885ef64b53a2026fe"
+      ],
+      "runtimeCodeHash": "0xe6d3794b5192e6d2734c32565bae0960184cfdfbf778d5fe3231027fcca7e214"
+    },
+    "StarFamilyVaultFactory": {
+      "address": "0x9849e859c38f4c28a900ec066472ce78e2b29567",
+      "transactionHash": "0x699e14bbb5dc370e00b88afccf6d8c164a070c1e1c7f2a417614e5d8e2134918",
+      "blockNumber": "11675798",
+      "sourceName": "src/StarFamilyVaultFactory.sol",
+      "constructorArguments": [
+        "0x23920ff112b125bad86e2e29b8986c4b29815886",
+        "0x5d5b0b72ea18aada8706412885ef64b53a2026fe",
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+        "0x38C8c7073cEc4153fA090f819528E69a857f3D90",
+        "0x2b893B0B15D71E735BB975daF8ffe26CEC449629",
+        "0x166030C9c3dC2609055d129be1eeE3E18bAEFe00",
+        {
+          "ethUsdFeed": "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+          "usdcUsdFeed": "0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E",
+          "ethUsdMaxAgeSeconds": 3600,
+          "usdcUsdMaxAgeSeconds": 90000,
+          "maxStrategyPriceDeviationBps": 1000,
+          "maxStrategyLifetimeSeconds": 1800,
+          "maxPositionUsdc": "1000000000",
+          "maxPositionWeth": "500000000000000000"
+        }
+      ],
+      "runtimeCodeHash": "0x730fd39d31c4be4b43806f13be99fde71f37aa3d1f90cd3d10d75a97e71caffa"
+    }
+  },
+  "roleTransactions": {
+    "grantFactoryAuthority": "0xaf1be4c7fb051f27fdd81ecc12182970d064bbe2d1e46a6e7d91a2a509b7726b",
+    "grantGoalsBurner": "0x9e82a00e6923e13247150c32ac9f6f88ed00e49f072db722a9af0d0e26a47ae6"
+  },
+  "roleAssertions": {
+    "factoryHasVaultFactoryRole": true,
+    "goalsIsBurner": true,
+    "factoryIsNotMinter": true,
+    "factoryIsNotBurner": true,
+    "goalsIsNotMinter": true,
+    "deployerIsNotMinter": true,
+    "deployerIsNotBurner": true,
+    "deployerHasAdminRole": true
+  },
+  "configuration": {
+    "CHAIN_ID": "11155111",
+    "ENS_PARENT_NAME": "starwallet.eth",
+    "STAR_ENS_REGISTRAR_ADDRESS": "0x1ef70c3f89e5cf457edb28c08a28010b7dfe5444",
+    "STAR_ENS_REGISTRAR_RUNTIME_CODE_HASH": "0x2fcf243c47933a974551d0613b256511ce488ce69ec6536f1d141046e52d8c28",
+    "USDC_ADDRESS": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    "WETH_ADDRESS": "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+    "AQUA_RUNTIME_CODE_HASH": "0x371f2cf0cf5ad231b80107ae85decb18555f997b613030fc55cd458110e502cf",
+    "AQUA_SWAP_VM_RUNTIME_CODE_HASH": "0xd62800eebe19bf048af1d70bbf00aead9d4b030fa1d2aff46c5bbe68e0248061",
+    "STAR_REGISTRY_ADDRESS": "0x23920ff112b125bad86e2e29b8986c4b29815886",
+    "STAR_REGISTRY_START_BLOCK": "11675795",
+    "STAR_TOKEN_ADDRESS": "0x5d5b0b72ea18aada8706412885ef64b53a2026fe",
+    "STAR_TOKEN_START_BLOCK": "11675796",
+    "STAR_GOALS_ADDRESS": "0x5b590d77cabee4ac8692a071b303095304c28416",
+    "STAR_GOALS_START_BLOCK": "11675797",
+    "STAR_FAMILY_VAULT_FACTORY_ADDRESS": "0x9849e859c38f4c28a900ec066472ce78e2b29567",
+    "STAR_CHILD_ACCOUNT_FACTORY_ADDRESS": "0xe5b5db333d57ef6652cb5752875a7aa3acf05630",
+    "CHILD_ACCOUNT_RP_ID": "star-frontend-mu.vercel.app",
+    "STAR_CHILD_ACCOUNT_FACTORY_RUNTIME_CODE_HASH": "0xd54cfbb4fe41ae054ffcbc1d777158dae43685209d6d89ace3c1e78325a897fb",
+    "STAR_FAMILY_VAULT_FACTORY_START_BLOCK": "11675798",
+    "STAR_REGISTRY_RUNTIME_CODE_HASH": "0xbb324dd12c67ae717105915c2a7672fcd9e6b2df3bcff1c6291ad32908564a9b",
+    "STAR_TOKEN_RUNTIME_CODE_HASH": "0x771bea2c274c5a26e1499e62ffcb8806131879cf0f21ffc966dba10c712a79d3",
+    "STAR_GOALS_RUNTIME_CODE_HASH": "0xe6d3794b5192e6d2734c32565bae0960184cfdfbf778d5fe3231027fcca7e214",
+    "STAR_FAMILY_VAULT_FACTORY_RUNTIME_CODE_HASH": "0x730fd39d31c4be4b43806f13be99fde71f37aa3d1f90cd3d10d75a97e71caffa",
+    "AQUA_ADDRESS": "0x38C8c7073cEc4153fA090f819528E69a857f3D90",
+    "AQUA_START_BLOCK": "11675793",
+    "AQUA_SWAP_VM_ADDRESS": "0x2b893B0B15D71E735BB975daF8ffe26CEC449629",
+    "AQUA_SWAP_VM_START_BLOCK": "11675794",
+    "CHAINLINK_ETH_USD_FEED_ADDRESS": "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+    "CHAINLINK_USDC_USD_FEED_ADDRESS": "0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E",
+    "CHAINLINK_ETH_USD_MAX_AGE_SECONDS": "3600",
+    "CHAINLINK_USDC_USD_MAX_AGE_SECONDS": "90000",
+    "AQUA_MAX_PRICE_DEVIATION_BPS": "1000",
+    "AQUA_MAX_STRATEGY_LIFETIME_SECONDS": "1800",
+    "AQUA_MAX_POSITION_USDC_UNITS": "1000000000",
+    "AQUA_MAX_POSITION_WETH_UNITS": "500000000000000000"
+  }
+}

@@ -12,6 +12,10 @@
       "types": "./child-account.d.ts",
       "default": "./child-account.js"
     },
+    "./network": {
+      "types": "./network.d.ts",
+      "default": "./network.js"
+    },
     "./abi": {
       "types": "./abi/index.d.ts",
       "default": "./abi/index.js"
@@ -22,8 +26,13 @@
     "fmt:check": "forge fmt --check",
     "test": "forge test",
     "test:scripts": "node --test test/*.test.mjs",
+    "deploy:all:sepolia": "npm run build && forge test -q && npm run preflight:aqua:sepolia && npm run deploy:aqua:sepolia && npm run preflight:sepolia && npm run deploy:sepolia",
     "preflight:aqua:sepolia": "DRY_RUN=true node --env-file-if-exists=.env scripts/deploy-aqua.mjs",
-    "deploy:aqua:sepolia": "node --env-file-if-exists=.env scripts/deploy-aqua.mjs"
+    "deploy:aqua:sepolia": "node --env-file-if-exists=.env scripts/deploy-aqua.mjs",
+    "preflight:sepolia": "DRY_RUN=true node --env-file-if-exists=.env scripts/deploy.mjs",
+    "deploy:sepolia": "node --env-file-if-exists=.env scripts/deploy.mjs",
+    "verify:sepolia": "node --env-file-if-exists=.env scripts/verify.mjs",
+    "verify:family-vault": "node --env-file-if-exists=.env scripts/verify-family-vault.mjs"
   },
   "devDependencies": {
     "@1inch/solidity-utils": "6.9.10",

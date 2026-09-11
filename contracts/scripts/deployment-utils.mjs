@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { getAddress, keccak256 } from "viem";
+import { sepoliaDeployment } from "../network.js";
 
 export function isDryRun(value) {
   if (value === undefined || value.trim() === "") return false;
@@ -7,6 +9,25 @@ export function isDryRun(value) {
   throw new Error(
     "DRY_RUN must be true or false; refusing to broadcast with an ambiguous value",
   );
+}
+
+export async function readManifest(path) {
+  const manifest = JSON.parse(await readFile(path, "utf8"));
+  if (
+    manifest.chainId !== sepoliaDeployment.chainId ||
+    manifest.network !== "sepolia"
+  )
+    throw new Error(
+      `Deployment must be Ethereum Sepolia (${sepoliaDeployment.chainId})`,
+    );
+  return manifest;
+}
+
+export function mergeConfiguration(manifest, environment) {
+  const result = { ...manifest?.configuration };
+  for (const [key, value] of Object.entries(environment))
+    if (value !== undefined && value.trim() !== "") result[key] = value.trim();
+  return result;
 }
 
 /** Check actual executable code against the pinned build, masking only solc's
