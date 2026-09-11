@@ -1,0 +1,25 @@
+query KidDashboard($childId: ID!) {
+  child(id: $childId) {
+    id
+    ensName
+    ensNode
+    starBalance
+    reservedStars
+    goals(where: { status: ACTIVE }, orderBy: createdAt, orderDirection: desc) {
+      id
+      title
+      starCost
+      status
+      redemptions(orderBy: requestedAt, orderDirection: desc, first: 1) {
+        id
+        status
+      }
+    }
+    rewards(orderBy: timestamp, orderDirection: desc, first: 10) {
+      id
+      stars
+      reason
+      timestamp
+    }
+  }
+}

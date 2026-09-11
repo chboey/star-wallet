@@ -1,0 +1,112 @@
+query ParentFamily($familyId: ID!) {
+  family(id: $familyId) {
+    id
+    parent
+    ensName
+    ensNode
+    active
+    childCount
+    vault {
+      id
+      parent
+      emergencyAdmin
+      aqua
+      swapVm
+      aquaPaused
+      createdAt
+      updatedAt
+      creationTransactionHash
+      updatedTransactionHash
+    }
+    childRegistrations(orderBy: proposedAt, orderDirection: desc) {
+      id
+      registrationId
+      childWallet
+      ensName
+      ensNode
+      status
+      proposedAt
+      resolvedAt
+      resolvedBy
+      proposalTransactionHash
+      resolutionTransactionHash
+      child { id wallet }
+    }
+    children(orderBy: createdAt, orderDirection: asc) {
+      id
+      wallet
+      ensName
+      ensNode
+      active
+      starBalance
+      reservedStars
+      totalStarsIssued
+      totalStarsBurned
+      totalPrincipalContributed
+    }
+    goals(orderBy: createdAt, orderDirection: desc) {
+      id
+      title
+      starCost
+      status
+      child { id }
+      createdAt
+      completedAt
+    }
+    redemptions(orderBy: requestedAt, orderDirection: desc) {
+      id
+      status
+      reservedStars
+      child { id }
+      goal { id title }
+      requestedAt
+      resolvedAt
+    }
+    savings {
+      vault { id }
+      totalPrincipalContributed
+      totalPrincipalWithdrawn
+      netPrincipal
+      totalUsdcWithdrawn
+      totalWethWithdrawn
+      availableUsdc
+      availableWeth
+      activePosition {
+        id
+        strategyHash
+        maker
+        openingUsdcAmount
+        openingWethAmount
+        currentUsdcAmount
+        currentWethAmount
+        closingUsdcAmount
+        closingWethAmount
+        sqrtPriceMin
+        sqrtPriceMax
+        feeBps
+        salt
+        deadline
+        oracleRawPrice
+        status
+        openedAt
+        executions(orderBy: timestamp, orderDirection: desc) {
+          id
+          type
+          app
+          tokenIn
+          tokenOut
+          amountIn
+          amountOut
+          transactionHash
+          sequence
+          timestamp
+        }
+      }
+    }
+  }
+  _meta {
+    block { number hash timestamp }
+    deployment
+    hasIndexingErrors
+  }
+}

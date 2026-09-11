@@ -1,0 +1,31 @@
+query FamilyActivity($familyId: String!, $first: Int!, $cursor: BigInt!) {
+  protocolActivities(
+    first: $first
+    orderBy: sequence
+    orderDirection: asc
+    where: { family: $familyId, sequence_gt: $cursor }
+  ) {
+    id
+    type
+    child {
+      id
+    }
+    registration {
+      id
+      registrationId
+    }
+    goal {
+      id
+    }
+    redemption {
+      id
+    }
+    amount
+    active
+    transactionHash
+    logIndex
+    sequence
+    blockNumber
+    timestamp
+  }
+}

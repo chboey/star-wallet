@@ -89,6 +89,11 @@ const args = [
   deployment.dependencies.swapVm,
   deployment.emergencyAdmin,
   deployment.aquaSafety,
+  await publicClient.readContract({
+    address: factory.address,
+    abi: factoryArtifact.abi,
+    functionName: "questsFactory",
+  }),
 ];
 const constructorArguments = encodeAbiParameters(
   [
@@ -113,6 +118,7 @@ const constructorArguments = encodeAbiParameters(
         { name: "maxPositionWeth", type: "uint256" },
       ],
     },
+    { type: "address" },
   ],
   args,
 ).slice(2);

@@ -1,5 +1,5 @@
 specVersion: 1.3.0
-description: Star Wallet family, goals, quests, and Star balance read model on Sepolia
+description: Star Wallet primary application read model on Sepolia
 schema:
   file: ./schema.graphql
 indexerHints:
@@ -22,6 +22,8 @@ dataSources:
         - ChildWallet
         - ChildRegistration
         - PendingChildRegistration
+        - SavingsAccount
+        - ProtocolActivity
       abis:
         - name: StarRegistry
           file: ./abis/StarRegistry.json
@@ -83,6 +85,7 @@ dataSources:
         - GoalRequest
         - Redemption
         - Child
+        - ProtocolActivity
       abis:
         - name: StarGoals
           file: ./abis/StarGoals.json
@@ -128,16 +131,73 @@ dataSources:
       entities:
         - Family
         - FamilyVault
+        - SavingsAccount
+        - ProtocolActivity
+        - ProtocolState
       abis:
         - name: StarFamilyVaultFactory
           file: ./abis/StarFamilyVaultFactory.json
         - name: StarFamilyVault
-          file: ./abis/StarFamilyVaultQuests.json
+          file: ./abis/StarFamilyVault.json
       eventHandlers:
         - event: FamilyVaultCreated(indexed uint256,indexed address,indexed
             address,address)
           handler: handleFamilyVaultCreated
       file: ./src/factory.ts
+  - kind: ethereum/contract
+    name: Aqua
+    network: sepolia
+    source:
+      abi: Aqua
+      address: "0x38C8c7073cEc4153fA090f819528E69a857f3D90"
+      startBlock: 11675793
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - AquaExecution
+        - FamilyVault
+        - SavingsPosition
+        - StrategyPosition
+        - PendingStrategyExecutions
+      abis:
+        - name: Aqua
+          file: ./abis/Aqua.json
+      eventHandlers:
+        - event: Shipped(address,address,bytes32,bytes)
+          handler: handleShipped
+        - event: Pushed(address,address,bytes32,address,uint256)
+          handler: handlePushed
+        - event: Pulled(address,address,bytes32,address,uint256)
+          handler: handlePulled
+        - event: Docked(address,address,bytes32)
+          handler: handleDocked
+      file: ./src/aqua.ts
+  - kind: ethereum/contract
+    name: AquaSwapVM
+    network: sepolia
+    source:
+      abi: AquaSwapVM
+      address: "0x2b893B0B15D71E735BB975daF8ffe26CEC449629"
+      startBlock: 11675794
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - AquaExecution
+        - FamilyVault
+        - SavingsPosition
+        - StrategyPosition
+        - PendingStrategyExecutions
+      abis:
+        - name: AquaSwapVM
+          file: ./abis/AquaSwapVM.json
+      eventHandlers:
+        - event: Swapped(bytes32,address,address,address,address,uint256,uint256)
+          handler: handleSwapped
+      file: ./src/aqua.ts
 templates:
   - kind: ethereum/contract
     name: StarQuestsTemplate
@@ -176,10 +236,39 @@ templates:
       language: wasm/assemblyscript
       entities:
         - FamilyVault
+        - Reward
+        - Child
+        - SavingsAccount
+        - SavingsContribution
+        - SavingsWithdrawal
+        - SavingsPosition
+        - StrategyPosition
+        - ProtocolActivity
+        - ProtocolState
+        - AquaExecution
+        - PendingStrategyExecutions
       abis:
         - name: StarFamilyVault
           file: ./abis/StarFamilyVault.json
       eventHandlers:
+        - event: StarsRewarded(indexed uint256,indexed uint256,uint256,uint256,string)
+          handler: handleStarsRewarded
+        - event: PrincipalContributed(indexed uint256,indexed uint256,uint256)
+          handler: handlePrincipalContributed
+        - event: SavingsUsdcWithdrawn(indexed uint256,uint256,uint256,indexed address)
+          handler: handleSavingsUsdcWithdrawn
+        - event: StrategyWethFunded(indexed uint256,uint256)
+          handler: handleStrategyWethFunded
+        - event: StrategyWethWithdrawn(indexed uint256,uint256,indexed address)
+          handler: handleStrategyWethWithdrawn
+        - event: SavingsPositionUpdated(indexed uint256,indexed
+            bytes32,uint256,uint256,bool)
+          handler: handleSavingsPositionUpdated
+        - event: SavingsPositionToppedUp(indexed uint256,indexed bytes32,uint256,uint256)
+          handler: handleSavingsPositionToppedUp
+        - event: SavingsStrategyConfigured(indexed uint256,indexed
+            bytes32,uint256,uint256,uint16,uint64,uint40,uint256)
+          handler: handleSavingsStrategyConfigured
         - event: AquaPauseUpdated(indexed address,bool)
           handler: handleAquaPauseUpdated
       file: ./src/vault.ts

@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { IStarRegistry } from "./interfaces/IStarRegistry.sol";
 import { IStarToken } from "./interfaces/IStarToken.sol";
 import { StarFamilyVault } from "./StarFamilyVault.sol";
+import { StarQuestsFactory } from "./StarQuestsFactory.sol";
 
 contract StarFamilyVaultFactory {
     uint16 private constant MAX_PRICE_DEVIATION_BPS_LIMIT = 2_500;
@@ -12,6 +13,7 @@ contract StarFamilyVaultFactory {
     uint32 private constant MAX_ORACLE_AGE_LIMIT_SECONDS = 7 days;
 
     IStarRegistry public immutable registry;
+    StarQuestsFactory public immutable questsFactory;
     IStarToken public immutable star;
     address public immutable usdc;
     address public immutable weth;
@@ -71,6 +73,7 @@ contract StarFamilyVaultFactory {
         ) revert InvalidSafetyConfiguration();
 
         registry = IStarRegistry(registryAddress);
+        questsFactory = new StarQuestsFactory();
         star = IStarToken(starAddress);
         usdc = usdcAddress;
         weth = wethAddress;
@@ -114,7 +117,8 @@ contract StarFamilyVaultFactory {
                 maxStrategyLifetimeSeconds: maxStrategyLifetimeSeconds,
                 maxPositionUsdc: maxPositionUsdc,
                 maxPositionWeth: maxPositionWeth
-            })
+            }),
+            questsFactory
         );
         vaultAddress = address(vault);
         vaultByFamily[familyId] = vaultAddress;

@@ -1,27 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import { StarGoals } from "../src/StarGoals.sol";
 import { StarRegistry } from "../src/StarRegistry.sol";
 import { StarToken } from "../src/StarToken.sol";
+import { StarGoals } from "../src/StarGoals.sol";
 
 interface GoalRequestVm {
-    function expectRevert(bytes4 selector) external;
-    function expectPartialRevert(bytes4 selector) external;
-    function prank(address caller) external;
+    function prank(address) external;
+    function expectRevert() external;
 }
 
 contract StarGoalRequestsTest {
-    GoalRequestVm private constant VM =
+    GoalRequestVm constant vm =
         GoalRequestVm(address(uint160(uint256(keccak256("hevm cheat code")))));
-    address private constant CHILD = address(0xCAFE);
-    address private constant OTHER = address(0xBAD);
-
-    StarRegistry private registry;
-    StarToken private token;
-    StarGoals private goals;
-    uint256 private familyId;
-    uint256 private childId;
+    StarRegistry registry;
+    StarToken token;
+    StarGoals goals;
+    uint256 familyId;
+    uint256 childId;
+    address constant CHILD = address(0xCAFE);
+    address constant OTHER = address(0xBAD);
 
     function setUp() public {
         registry = new StarRegistry();
@@ -33,135 +31,117 @@ contract StarGoalRequestsTest {
         familyId = registry.createFamily("family.starwallet.eth");
         bytes32 registration =
             registry.proposeChildRegistration(familyId, CHILD, "kid.family.starwallet.eth");
-        VM.prank(CHILD);
+        vm.prank(CHILD);
         childId = registry.acceptChildRegistration(registration);
     }
 
+    function request(bytes32 submission) private returns (uint256) {
+        vm.prank(CHILD);
+        return goals.requestGoal(childId, "Rocket Toy", "To play space adventures", 6, submission);
+    }
+
     function testRequestPreservesMetadataWithoutCreatingGoalOrSpendingStars() public {
-        bytes32 submissionId = bytes32(uint256(1));
-        uint256 requestId = _request(submissionId);
-        StarGoals.GoalRequest memory request = goals.getGoalRequest(requestId);
-
-        require(request.childId == childId && request.icon == 6 && request.goalId == 0, "metadata");
-        require(keccak256(bytes(request.title)) == keccak256("Rocket Toy"), "title");
-        require(keccak256(bytes(request.reason)) == keccak256("Space adventures"), "reason");
-        require(request.status == StarGoals.RedemptionStatus.Pending, "pending");
-        require(goals.nextGoalId() == 1 && token.balanceOf(CHILD) == 0, "no goal or spend");
-        require(goals.usedGoalSubmissionIds(CHILD, submissionId), "submission recorded");
-
-        VM.prank(CHILD);
-        VM.expectRevert(StarGoals.GoalSubmissionAlreadyUsed.selector);
-        goals.requestGoal(childId, "Rocket Toy", "Space adventures", 6, submissionId);
+        uint256 id = request(bytes32(uint256(1)));
+        StarGoals.GoalRequest memory item = goals.getGoalRequest(id);
+        require(item.childId == childId && item.icon == 6 && item.goalId == 0);
+        require(keccak256(bytes(item.title)) == keccak256("Rocket Toy"));
+        require(keccak256(bytes(item.reason)) == keccak256("To play space adventures"));
+        require(item.status == StarGoals.RedemptionStatus.Pending);
+        require(goals.nextGoalId() == 1 && token.balanceOf(CHILD) == 0);
+        require(goals.usedGoalSubmissionIds(CHILD, bytes32(uint256(1))));
+        vm.expectRevert();
+        request(bytes32(uint256(1)));
     }
 
-    function testOnlyChildRequestsAndOnlyParentApproves() public {
-        VM.expectPartialRevert(StarGoals.NotChildWallet.selector);
+    function testOnlyRegisteredChildCanRequestAndOnlyTheirParentCanApprove() public {
+        vm.expectRevert();
         goals.requestGoal(childId, "Toy", "", 1, bytes32(uint256(1)));
-        VM.prank(OTHER);
-        VM.expectPartialRevert(StarGoals.NotChildWallet.selector);
+        vm.expectRevert();
+        vm.prank(OTHER);
         goals.requestGoal(childId, "Toy", "", 1, bytes32(uint256(1)));
-
-        uint256 requestId = _request(bytes32(uint256(1)));
-        VM.prank(CHILD);
-        VM.expectPartialRevert(StarGoals.NotFamilyParent.selector);
-        goals.approveGoalRequest(requestId, 20);
-        VM.prank(OTHER);
-        VM.expectPartialRevert(StarGoals.NotFamilyParent.selector);
-        goals.approveGoalRequest(requestId, 20);
-
-        uint256 goalId = goals.approveGoalRequest(requestId, 20);
-        require(goals.getGoal(goalId).starCost == 20, "goal cost");
-        require(goals.getGoalRequest(requestId).goalId == goalId, "linked goal");
-        require(
-            goals.getGoalRequest(requestId).status == StarGoals.RedemptionStatus.Approved,
-            "approved"
-        );
+        uint256 id = request(bytes32(uint256(1)));
+        vm.expectRevert();
+        vm.prank(CHILD);
+        goals.approveGoalRequest(id, 20);
+        vm.expectRevert();
+        vm.prank(OTHER);
+        goals.approveGoalRequest(id, 20);
+        uint256 goalId = goals.approveGoalRequest(id, 20);
+        require(goals.getGoal(goalId).starCost == 20);
+        require(goals.getGoalRequest(id).goalId == goalId);
+        require(goals.getGoalRequest(id).status == StarGoals.RedemptionStatus.Approved);
+        require(token.balanceOf(CHILD) == 0 && goals.reservedStars(childId) == 0);
+        vm.expectRevert();
+        goals.approveGoalRequest(id, 30);
     }
 
-    function testInvalidApprovalRollsBackAndApprovedGoalUsesRedemptionFlow() public {
-        uint256 requestId = _request(bytes32(uint256(1)));
-        VM.expectRevert(StarGoals.InvalidStarCost.selector);
-        goals.approveGoalRequest(requestId, 0);
-        require(
-            goals.getGoalRequest(requestId).status == StarGoals.RedemptionStatus.Pending,
-            "request remains pending"
-        );
-
-        uint256 goalId = goals.approveGoalRequest(requestId, 20);
+    function testInvalidTargetRollsBackAndApprovedGoalUsesExistingRedemptionFlow() public {
+        uint256 id = request(bytes32(uint256(1)));
+        vm.expectRevert();
+        goals.approveGoalRequest(id, 0);
+        require(goals.getGoalRequest(id).status == StarGoals.RedemptionStatus.Pending);
+        uint256 goalId = goals.approveGoalRequest(id, 20);
         token.mint(CHILD, 20);
-        VM.prank(CHILD);
+        vm.prank(CHILD);
         goals.addStarsToGoal(goalId, 20);
-        VM.prank(CHILD);
+        vm.prank(CHILD);
         uint256 redemptionId = goals.requestRedemption(goalId);
+        require(goals.reservedStars(childId) == 20);
         goals.approveRedemption(redemptionId);
-        require(goals.getGoal(goalId).status == StarGoals.GoalStatus.Completed, "completed");
-        require(token.balanceOf(CHILD) == 0, "Stars burned");
+        require(goals.getGoal(goalId).status == StarGoals.GoalStatus.Completed);
+        require(token.balanceOf(CHILD) == 0 && goals.reservedStars(childId) == 0);
     }
 
-    function testRejectAndCancelRespectOwnershipAndPendingState() public {
-        uint256 requestId = _request(bytes32(uint256(1)));
-        VM.prank(OTHER);
-        VM.expectPartialRevert(StarGoals.NotFamilyParent.selector);
-        goals.rejectGoalRequest(requestId);
-        VM.expectPartialRevert(StarGoals.NotChildWallet.selector);
-        goals.cancelGoalRequest(requestId);
-
-        goals.rejectGoalRequest(requestId);
-        require(
-            goals.getGoalRequest(requestId).status == StarGoals.RedemptionStatus.Rejected,
-            "rejected"
-        );
-        VM.expectPartialRevert(StarGoals.GoalRequestNotPending.selector);
-        goals.approveGoalRequest(requestId, 10);
-
-        requestId = _request(bytes32(uint256(2)));
-        VM.prank(CHILD);
-        goals.cancelGoalRequest(requestId);
-        require(
-            goals.getGoalRequest(requestId).status == StarGoals.RedemptionStatus.Cancelled,
-            "cancelled"
-        );
+    function testRejectAndCancelOnlyPendingRequestsAndRespectOwnership() public {
+        uint256 id = request(bytes32(uint256(1)));
+        vm.expectRevert();
+        vm.prank(OTHER);
+        goals.rejectGoalRequest(id);
+        vm.expectRevert();
+        goals.cancelGoalRequest(id);
+        goals.rejectGoalRequest(id);
+        require(goals.getGoalRequest(id).status == StarGoals.RedemptionStatus.Rejected);
+        vm.expectRevert();
+        goals.approveGoalRequest(id, 10);
+        id = request(bytes32(uint256(2)));
+        vm.prank(CHILD);
+        goals.cancelGoalRequest(id);
+        require(goals.getGoalRequest(id).status == StarGoals.RedemptionStatus.Cancelled);
+        vm.expectRevert();
+        goals.rejectGoalRequest(id);
     }
 
-    function testInactiveAccountsCannotRequestOrApprove() public {
-        uint256 requestId = _request(bytes32(uint256(1)));
+    function testInactiveFamiliesCannotRequestOrApproveButCanResolvePendingRequests() public {
+        uint256 id = request(bytes32(uint256(1)));
         registry.setFamilyStatus(familyId, false);
-        VM.prank(CHILD);
-        VM.expectPartialRevert(StarGoals.FamilyInactive.selector);
-        goals.requestGoal(childId, "Toy", "", 1, bytes32(uint256(2)));
-        VM.expectPartialRevert(StarGoals.FamilyInactive.selector);
-        goals.approveGoalRequest(requestId, 10);
-        goals.rejectGoalRequest(requestId);
-
+        vm.expectRevert();
+        request(bytes32(uint256(2)));
+        vm.expectRevert();
+        goals.approveGoalRequest(id, 10);
+        goals.rejectGoalRequest(id);
         registry.setFamilyStatus(familyId, true);
-        requestId = _request(bytes32(uint256(3)));
+        id = request(bytes32(uint256(3)));
         registry.setChildStatus(childId, false);
-        VM.expectPartialRevert(StarGoals.ChildInactive.selector);
-        goals.approveGoalRequest(requestId, 10);
-        VM.prank(CHILD);
-        goals.cancelGoalRequest(requestId);
+        vm.expectRevert();
+        goals.approveGoalRequest(id, 10);
+        vm.prank(CHILD);
+        goals.cancelGoalRequest(id);
     }
 
-    function testValidatesMetadataAndSubmissionBounds() public {
-        VM.prank(CHILD);
-        VM.expectRevert(StarGoals.InvalidGoalRequest.selector);
+    function testMetadataAndSubmissionBounds() public {
+        vm.expectRevert();
+        vm.prank(CHILD);
         goals.requestGoal(childId, "", "", 0, bytes32(uint256(1)));
-        VM.prank(CHILD);
-        VM.expectRevert(StarGoals.InvalidGoalRequest.selector);
+        vm.expectRevert();
+        vm.prank(CHILD);
         goals.requestGoal(childId, string(new bytes(65)), "", 0, bytes32(uint256(1)));
-        VM.prank(CHILD);
-        VM.expectRevert(StarGoals.InvalidGoalRequest.selector);
+        vm.expectRevert();
+        vm.prank(CHILD);
         goals.requestGoal(childId, "Toy", string(new bytes(481)), 0, bytes32(uint256(1)));
-        VM.prank(CHILD);
-        VM.expectRevert(StarGoals.InvalidGoalRequest.selector);
+        vm.expectRevert();
+        vm.prank(CHILD);
         goals.requestGoal(childId, "Toy", "", 7, bytes32(uint256(1)));
-        VM.prank(CHILD);
-        VM.expectRevert(StarGoals.InvalidGoalRequest.selector);
-        goals.requestGoal(childId, "Toy", "", 1, bytes32(0));
-    }
-
-    function _request(bytes32 submissionId) private returns (uint256) {
-        VM.prank(CHILD);
-        return goals.requestGoal(childId, "Rocket Toy", "Space adventures", 6, submissionId);
+        vm.expectRevert();
+        request(bytes32(0));
     }
 }

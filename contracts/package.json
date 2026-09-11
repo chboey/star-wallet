@@ -24,15 +24,16 @@
   "scripts": {
     "build": "node scripts/compile.mjs && forge build --force",
     "fmt:check": "forge fmt --check",
-    "test": "forge test",
     "test:scripts": "node --test test/*.test.mjs",
-    "deploy:all:sepolia": "npm run build && forge test -q && npm run preflight:aqua:sepolia && npm run deploy:aqua:sepolia && npm run preflight:sepolia && npm run deploy:sepolia",
+    "deploy:all:sepolia": "npm run build && forge test -q && npm run preflight:aqua:sepolia && npm run deploy:aqua:sepolia && npm run preflight:sepolia && npm run deploy:sepolia && npm run preflight:ens:sepolia && npm run setup:ens:sepolia",
     "preflight:aqua:sepolia": "DRY_RUN=true node --env-file-if-exists=.env scripts/deploy-aqua.mjs",
     "deploy:aqua:sepolia": "node --env-file-if-exists=.env scripts/deploy-aqua.mjs",
     "preflight:sepolia": "DRY_RUN=true node --env-file-if-exists=.env scripts/deploy.mjs",
     "deploy:sepolia": "node --env-file-if-exists=.env scripts/deploy.mjs",
     "verify:sepolia": "node --env-file-if-exists=.env scripts/verify.mjs",
-    "verify:family-vault": "node --env-file-if-exists=.env scripts/verify-family-vault.mjs"
+    "verify:family-vault": "node --env-file-if-exists=.env scripts/verify-family-vault.mjs",
+    "preflight:ens:sepolia": "npm --prefix ../backend run ens:setup",
+    "setup:ens:sepolia": "npm --prefix ../backend run ens:setup -- --broadcast"
   },
   "devDependencies": {
     "@1inch/solidity-utils": "6.9.10",

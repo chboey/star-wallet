@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { isDryRun, mergeConfiguration } from "../scripts/deployment-utils.mjs";
 
-test("deploy-all checks each available stage and stops on failure, in dependency order", async () => {
+test("deploy-all checks each stage and stops on failure, in dependency order", async () => {
   const { scripts } = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   );
@@ -14,6 +14,8 @@ test("deploy-all checks each available stage and stops on failure, in dependency
     "npm run deploy:aqua:sepolia",
     "npm run preflight:sepolia",
     "npm run deploy:sepolia",
+    "npm run preflight:ens:sepolia",
+    "npm run setup:ens:sepolia",
   ]);
 });
 

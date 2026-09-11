@@ -10,12 +10,43 @@ enum QuestStatus {
   COMPLETED
   CANCELLED
 }
-
 enum StarRequestStatus {
   PENDING
   APPROVED
   REJECTED
   CANCELLED
+}
+
+type Quest @entity(immutable: false) {
+  id: ID!
+  questId: BigInt!
+  workflow: Bytes!
+  family: Family!
+  child: Child!
+  title: String!
+  stars: BigInt!
+  status: QuestStatus!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  requests: [StarRequest!]! @derivedFrom(field: "quest")
+}
+
+type StarRequest @entity(immutable: false) {
+  id: ID!
+  requestId: BigInt!
+  workflow: Bytes!
+  family: Family!
+  child: Child!
+  quest: Quest
+  stars: BigInt!
+  reason: String!
+  submissionId: Bytes!
+  status: StarRequestStatus!
+  reward: Reward
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  creationTransactionHash: Bytes!
+  resolutionTransactionHash: Bytes
 }
 
 enum RedemptionStatus {
@@ -25,28 +56,78 @@ enum RedemptionStatus {
   CANCELLED
 }
 
+enum SavingsPositionStatus {
+  ACTIVE
+  DOCKED
+}
+
+enum AquaExecutionType {
+  SHIPPED
+  PUSHED
+  PULLED
+  SWAPPED
+  DOCKED
+}
+
 enum ChildRegistrationStatus {
   PENDING
   ACCEPTED
   CANCELLED
 }
 
+enum SavingsAsset {
+  USDC
+  WETH
+}
+
+enum ProtocolActivityType {
+  FAMILY_CREATED
+  FAMILY_STATUS_UPDATED
+  CHILD_REGISTRATION_PROPOSED
+  CHILD_REGISTRATION_ACCEPTED
+  CHILD_REGISTRATION_CANCELLED
+  CHILD_REGISTERED
+  CHILD_STATUS_UPDATED
+  GOAL_CREATED
+  GOAL_STARS_ADDED
+  GOAL_CANCELLED
+  GOAL_COMPLETED
+  REDEMPTION_REQUESTED
+  REDEMPTION_APPROVED
+  REDEMPTION_REJECTED
+  REDEMPTION_CANCELLED
+  FAMILY_VAULT_CREATED
+  STARS_REWARDED
+  PRINCIPAL_CONTRIBUTED
+  SAVINGS_USDC_WITHDRAWN
+  STRATEGY_WETH_FUNDED
+  STRATEGY_WETH_WITHDRAWN
+  SAVINGS_POSITION_ACTIVE
+  SAVINGS_POSITION_DOCKED
+  SAVINGS_POSITION_TOPPED_UP
+  AQUA_PAUSED
+  AQUA_RESUMED
+}
+
 type Family @entity(immutable: false) {
   id: ID!
   parent: Bytes!
   ensNode: Bytes!
-  ensName: String!
+  ensName: String
   active: Boolean!
   vault: FamilyVault
   childCount: Int!
   createdAt: BigInt!
   updatedAt: BigInt!
   children: [Child!]! @derivedFrom(field: "family")
-  childRegistrations: [ChildRegistration!]! @derivedFrom(field: "family")
-  goals: [Goal!]! @derivedFrom(field: "family")
-  redemptions: [Redemption!]! @derivedFrom(field: "family")
   quests: [Quest!]! @derivedFrom(field: "family")
   starRequests: [StarRequest!]! @derivedFrom(field: "family")
+  childRegistrations: [ChildRegistration!]! @derivedFrom(field: "family")
+  goals: [Goal!]! @derivedFrom(field: "family")
+  rewards: [Reward!]! @derivedFrom(field: "family")
+  redemptions: [Redemption!]! @derivedFrom(field: "family")
+  savings: SavingsAccount!
+  activities: [ProtocolActivity!]! @derivedFrom(field: "family")
 }
 
 type FamilyVault @entity(immutable: false) {
@@ -67,6 +148,7 @@ type FamilyVault @entity(immutable: false) {
 }
 
 type ChildRegistration @entity(immutable: false) {
+  # Unique proposal event ID. registrationId is the reusable on-chain hash.
   id: Bytes!
   registrationId: Bytes!
   family: Family!
@@ -84,6 +166,7 @@ type ChildRegistration @entity(immutable: false) {
 }
 
 type PendingChildRegistration @entity(immutable: false) {
+  # On-chain registrationId.
   id: Bytes!
   registration: ChildRegistration!
 }
@@ -99,12 +182,15 @@ type Child @entity(immutable: false) {
   reservedStars: BigInt!
   totalStarsIssued: BigInt!
   totalStarsBurned: BigInt!
+  totalPrincipalContributed: BigInt!
   createdAt: BigInt!
   updatedAt: BigInt!
   goals: [Goal!]! @derivedFrom(field: "child")
-  redemptions: [Redemption!]! @derivedFrom(field: "child")
   quests: [Quest!]! @derivedFrom(field: "child")
   starRequests: [StarRequest!]! @derivedFrom(field: "child")
+  rewards: [Reward!]! @derivedFrom(field: "child")
+  redemptions: [Redemption!]! @derivedFrom(field: "child")
+  contributions: [SavingsContribution!]! @derivedFrom(field: "child")
 }
 
 type ChildWallet @entity(immutable: false) {
@@ -118,6 +204,18 @@ type StarBalance @entity(immutable: false) {
   totalIssued: BigInt!
   totalBurned: BigInt!
   updatedAt: BigInt!
+}
+
+type Reward @entity(immutable: true) {
+  id: ID!
+  family: Family!
+  child: Child!
+  stars: BigInt!
+  principalUsdc: BigInt!
+  reason: String!
+  transactionHash: Bytes!
+  blockNumber: BigInt!
+  timestamp: BigInt!
 }
 
 type Goal @entity(immutable: false) {
@@ -166,34 +264,132 @@ type Redemption @entity(immutable: false) {
   updatedAt: BigInt!
 }
 
-type Quest @entity(immutable: false) {
+type SavingsAccount @entity(immutable: false) {
   id: ID!
-  questId: BigInt!
-  workflow: Bytes!
   family: Family!
-  child: Child!
-  title: String!
-  stars: BigInt!
-  status: QuestStatus!
-  createdAt: BigInt!
+  vault: FamilyVault
+  totalPrincipalContributed: BigInt!
+  totalPrincipalWithdrawn: BigInt!
+  netPrincipal: BigInt!
+  totalUsdcWithdrawn: BigInt!
+  totalWethWithdrawn: BigInt!
+  availableUsdc: BigInt!
+  availableWeth: BigInt!
+  activePosition: SavingsPosition
   updatedAt: BigInt!
-  requests: [StarRequest!]! @derivedFrom(field: "quest")
+  contributions: [SavingsContribution!]! @derivedFrom(field: "account")
+  withdrawals: [SavingsWithdrawal!]! @derivedFrom(field: "account")
+  positions: [SavingsPosition!]! @derivedFrom(field: "account")
 }
 
-type StarRequest @entity(immutable: false) {
-  id: ID!
-  requestId: BigInt!
-  workflow: Bytes!
+type SavingsContribution @entity(immutable: true) {
+  id: Bytes!
+  account: SavingsAccount!
   family: Family!
   child: Child!
-  quest: Quest
-  stars: BigInt!
-  reason: String!
-  submissionId: Bytes!
-  status: StarRequestStatus!
-  rewardId: BigInt
-  createdAt: BigInt!
+  amount: BigInt!
+  transactionHash: Bytes!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+type SavingsWithdrawal @entity(immutable: true) {
+  id: Bytes!
+  account: SavingsAccount!
+  family: Family!
+  asset: SavingsAsset!
+  amount: BigInt!
+  principalAmount: BigInt!
+  recipient: Bytes!
+  transactionHash: Bytes!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+type SavingsPosition @entity(immutable: false) {
+  id: ID!
+  account: SavingsAccount!
+  family: Family!
+  strategyHash: Bytes!
+  maker: Bytes!
+  openingUsdcAmount: BigInt!
+  openingWethAmount: BigInt!
+  currentUsdcAmount: BigInt!
+  currentWethAmount: BigInt!
+  closingUsdcAmount: BigInt
+  closingWethAmount: BigInt
+  sqrtPriceMin: BigInt!
+  sqrtPriceMax: BigInt!
+  feeBps: BigInt!
+  salt: BigInt!
+  deadline: BigInt!
+  oracleRawPrice: BigInt!
+  status: SavingsPositionStatus!
+  openedAt: BigInt!
+  closedAt: BigInt
   updatedAt: BigInt!
-  creationTransactionHash: Bytes!
-  resolutionTransactionHash: Bytes
+  executions: [AquaExecution!]! @derivedFrom(field: "position")
+}
+
+type StrategyPosition @entity(immutable: false) {
+  # Composite maker || strategyHash key: Aqua hashes strategy bytes only, so
+  # identical strategies can legitimately exist under different makers.
+  id: Bytes!
+  position: SavingsPosition!
+}
+
+type PendingStrategyExecutions @entity(immutable: false) {
+  # Uses the same composite maker || strategyHash key as StrategyPosition.
+  id: Bytes!
+  executionIds: [Bytes!]!
+}
+
+type AquaExecution @entity(immutable: false) {
+  id: Bytes!
+  position: SavingsPosition
+  family: Family
+  strategyHash: Bytes!
+  type: AquaExecutionType!
+  maker: Bytes!
+  app: Bytes!
+  taker: Bytes
+  token: Bytes
+  tokenIn: Bytes
+  tokenOut: Bytes
+  amount: BigInt
+  amountIn: BigInt
+  amountOut: BigInt
+  transactionHash: Bytes!
+  logIndex: BigInt!
+  sequence: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+type ProtocolActivity @entity(immutable: true) {
+  id: Bytes!
+  type: ProtocolActivityType!
+  family: Family
+  child: Child
+  registration: ChildRegistration
+  goal: Goal
+  redemption: Redemption
+  amount: BigInt
+  active: Boolean
+  transactionHash: Bytes!
+  logIndex: BigInt!
+  sequence: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+type ProtocolState @entity(immutable: false) {
+  id: ID!
+  factory: Bytes!
+  vaultCount: Int!
+  pausedVaultCount: Int!
+  hasPausedVaults: Boolean!
+  emergencyAdmin: Bytes!
+  updatedAt: BigInt!
+  updatedTransactionHash: Bytes!
 }

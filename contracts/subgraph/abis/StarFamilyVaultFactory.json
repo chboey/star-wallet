@@ -315,6 +315,19 @@
   },
   {
     "inputs": [],
+    "name": "questsFactory",
+    "outputs": [
+      {
+        "internalType": "contract StarQuestsFactory",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "registry",
     "outputs": [
       {

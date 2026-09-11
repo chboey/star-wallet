@@ -169,6 +169,10 @@ await writeFile(
 await mkdir(resolve(root, "subgraph/abis"), { recursive: true });
 await Promise.all([
   writeFile(
+    resolve(root, "subgraph/abis/StarQuests.json"),
+    `${JSON.stringify(questsAbi, null, 2)}\n`,
+  ),
+  writeFile(
     resolve(root, "subgraph/abis/StarRegistry.json"),
     `${JSON.stringify(registryAbi, null, 2)}\n`,
   ),
@@ -179,10 +183,6 @@ await Promise.all([
   writeFile(
     resolve(root, "subgraph/abis/StarGoals.json"),
     `${JSON.stringify(starGoalsAbi, null, 2)}\n`,
-  ),
-  writeFile(
-    resolve(root, "subgraph/abis/StarQuests.json"),
-    `${JSON.stringify(questsAbi, null, 2)}\n`,
   ),
   writeFile(
     resolve(root, "subgraph/abis/StarFamilyVault.json"),

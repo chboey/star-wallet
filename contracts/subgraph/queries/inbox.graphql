@@ -1,0 +1,69 @@
+# Example variables:
+# {"questsWhere":{"family":"1","child":"1","status":"ACTIVE"},
+#  "requestsWhere":{"family":"1","child":"1","status":"PENDING"},
+#  "first":50,"skip":0}
+# Omit child filters for the parent inbox. Request/quest IDs are workflow-scoped.
+query Inbox(
+  $questsWhere: Quest_filter!
+  $requestsWhere: StarRequest_filter!
+  $first: Int!
+  $skip: Int!
+) {
+  quests(
+    where: $questsWhere
+    first: $first
+    skip: $skip
+    orderBy: questId
+    orderDirection: desc
+  ) {
+    id
+    questId
+    workflow
+    title
+    stars
+    status
+    child {
+      id
+      ensName
+    }
+  }
+  starRequests(
+    where: $requestsWhere
+    first: $first
+    skip: $skip
+    orderBy: requestId
+    orderDirection: desc
+  ) {
+    id
+    requestId
+    workflow
+    reason
+    stars
+    status
+    submissionId
+    child {
+      id
+      ensName
+    }
+    quest {
+      id
+      questId
+      title
+    }
+    reward {
+      id
+      transactionHash
+    }
+    creationTransactionHash
+    resolutionTransactionHash
+  }
+  _meta {
+    deployment
+    block {
+      number
+      hash
+      timestamp
+    }
+    hasIndexingErrors
+  }
+}

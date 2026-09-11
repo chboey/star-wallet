@@ -3592,6 +3592,11 @@ export declare const familyVaultAbi: readonly [
         "internalType": "struct StarFamilyVault.AquaSafetyConfig",
         "name": "safety",
         "type": "tuple"
+      },
+      {
+        "internalType": "contract StarQuestsFactory",
+        "name": "questsFactory",
+        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
@@ -4547,6 +4552,25 @@ export declare const familyVaultAbi: readonly [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "requestId",
+        "type": "uint256"
+      }
+    ],
+    "name": "approveStarRequest",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "aqua",
     "outputs": [
@@ -4933,6 +4957,19 @@ export declare const familyVaultAbi: readonly [
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "quests",
+    "outputs": [
+      {
+        "internalType": "contract StarQuests",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -5526,6 +5563,19 @@ export declare const familyVaultFactoryAbi: readonly [
         "internalType": "uint16",
         "name": "",
         "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "questsFactory",
+    "outputs": [
+      {
+        "internalType": "contract StarQuestsFactory",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",

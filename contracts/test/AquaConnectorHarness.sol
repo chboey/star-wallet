@@ -8,7 +8,7 @@ import { Deadline, Salt } from "../vendor/1inch-swap-vm/src/instructions/Control
 import { FeeFlatIn } from "../vendor/1inch-swap-vm/src/instructions/FeeFlat.sol";
 import { XYCConcentrateSwap } from "../vendor/1inch-swap-vm/src/instructions/XYCConcentrate.sol";
 
-/// Independent encoding oracle: calls the unmodified upstream Solidity builders.
+/// Independent encoding oracle: calls the UNMODIFIED upstream Solidity builders.
 library ConnectorReference {
     function buildOrder(
         address maker,

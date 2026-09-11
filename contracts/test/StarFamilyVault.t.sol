@@ -2,21 +2,61 @@
 pragma solidity ^0.8.24;
 
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { ConnectorReference } from "./AquaConnectorHarness.sol";
+import { Aqua } from "../vendor/1inch-aqua/src/Aqua.sol";
+import { AquaSwapVMRouter } from "../vendor/1inch-swap-vm/src/routers/AquaSwapVMRouter.sol";
+import { ISwapVM } from "../vendor/1inch-swap-vm/src/interfaces/ISwapVM.sol";
 import { StarFamilyVault } from "../src/StarFamilyVault.sol";
-import { StarRegistry } from "../src/StarRegistry.sol";
-import { StarToken } from "../src/StarToken.sol";
+import { StarQuestsFactory } from "../src/StarQuestsFactory.sol";
 import { IAqua } from "../src/interfaces/IAqua.sol";
 import { IChainlinkAggregatorV3 } from "../src/interfaces/IChainlinkAggregatorV3.sol";
+import { IStarRegistry } from "../src/interfaces/IStarRegistry.sol";
+import { IStarToken } from "../src/interfaces/IStarToken.sol";
 
-interface VaultVm {
-    function warp(uint256 timestamp) external;
-    function expectRevert(bytes4 selector) external;
-    function expectPartialRevert(bytes4 selector) external;
-    function prank(address caller) external;
+interface IForkUsdc {
+    function masterMinter() external view returns (address);
+    function configureMinter(address minter, uint256 amount) external returns (bool);
+    function mint(address to, uint256 amount) external returns (bool);
 }
 
-contract MockVaultFeed is IChainlinkAggregatorV3 {
+interface Vm {
+    function skip(bool skipTest) external;
+    function warp(uint256 timestamp) external;
+    function expectPartialRevert(bytes4 selector) external;
+    function expectRevert() external;
+    function envOr(string calldata name, string calldata defaultValue)
+        external
+        view
+        returns (string memory value);
+    function createSelectFork(string calldata rpcUrl) external returns (uint256 forkId);
+    function deal(address account, uint256 newBalance) external;
+    function startPrank(address account) external;
+    function stopPrank() external;
+}
+
+interface IWeth {
+    function deposit() external payable;
+}
+
+contract MockERC20 is ERC20 {
+    uint8 private tokenDecimals;
+
+    constructor() ERC20("Mock", "MOCK") { }
+
+    function setDecimals(uint8 value) external {
+        tokenDecimals = value;
+    }
+
+    function decimals() public view override returns (uint8) {
+        return tokenDecimals;
+    }
+
+    function mint(address account, uint256 amount) external {
+        _mint(account, amount);
+    }
+}
+
+contract MockFeed is IChainlinkAggregatorV3 {
     uint8 public immutable override decimals;
     uint80 public roundId = 1;
     int256 public answer;
@@ -44,474 +84,646 @@ contract MockVaultFeed is IChainlinkAggregatorV3 {
     }
 }
 
-    contract MockVaultAsset is ERC20 {
-        uint8 private immutable assetDecimals;
-
-        constructor(string memory name_, string memory symbol_, uint8 decimals_)
-            ERC20(name_, symbol_)
-        {
-            assetDecimals = decimals_;
-        }
-
-        function decimals() public view override returns (uint8) {
-            return assetDecimals;
-        }
-
-        function mint(address account, uint256 amount) external {
-            _mint(account, amount);
-        }
-    }
-
-    contract MockVaultAqua is IAqua {
-        address public failingPushToken;
-        mapping(
-            address maker
-                => mapping(
-                address app => mapping(bytes32 hash => mapping(address token => uint256))
-            )
-        ) public balance;
-
-        function setFailingPushToken(address token) external {
-            failingPushToken = token;
-        }
-
-        function ship(
-            address app,
-            bytes calldata strategy,
-            address[] calldata tokens,
-            uint256[] calldata amounts
-        ) external returns (bytes32 strategyHash) {
-            require(tokens.length == amounts.length, "length");
-            strategyHash = keccak256(strategy);
-            for (uint256 i; i < tokens.length; ++i) {
-                balance[msg.sender][app][strategyHash][tokens[i]] = amounts[i];
-            }
-        }
-
-        function dock(address app, bytes32 strategyHash, address[] calldata tokens) external {
-            for (uint256 i; i < tokens.length; ++i) {
-                balance[msg.sender][app][strategyHash][tokens[i]] = 0;
-            }
-        }
-
-        function push(
-            address maker,
-            address app,
-            bytes32 strategyHash,
-            address token,
-            uint256 amount
-        ) external {
-            require(token != failingPushToken, "push failed");
-            balance[maker][app][strategyHash][token] += amount;
-        }
-
-        function safeBalances(
-            address maker,
-            address app,
-            bytes32 strategyHash,
-            address token0,
-            address token1
-        ) external view returns (uint256 balance0, uint256 balance1) {
-            return (
-                balance[maker][app][strategyHash][token0], balance[maker][app][strategyHash][token1]
-            );
-        }
-    }
-
-    contract StarFamilyVaultTest {
-        VaultVm private constant VM =
-            VaultVm(address(uint160(uint256(keccak256("hevm cheat code")))));
-        address private constant CHILD = address(0xCAFE);
-        address private constant RECIPIENT = address(0xBEEF);
-        address private constant OTHER = address(0xBAD);
-        uint256 private constant DEFAULT_MAKER_TRAITS =
-            (uint256(1) << 254) | (uint256(0x0028002800280028) << 160);
-
-        StarRegistry private registry;
-        StarToken private star;
-        MockVaultAsset private usdc;
-        MockVaultAsset private weth;
-        MockVaultAqua private aqua;
-        MockVaultFeed private ethFeed;
-        MockVaultFeed private usdcFeed;
-        StarFamilyVault private vault;
-        uint256 private familyId;
-        uint256 private childId;
-        address private constant SWAP_VM = address(0x1111);
-
-        function setUp() public {
-            VM.warp(1_000_000);
-            registry = new StarRegistry();
-            star = new StarToken(address(this));
-            usdc = new MockVaultAsset("USD Coin", "USDC", 6);
-            weth = new MockVaultAsset("Wrapped Ether", "WETH", 18);
-            aqua = new MockVaultAqua();
-            ethFeed = new MockVaultFeed(8, 2_000e8, block.timestamp);
-            usdcFeed = new MockVaultFeed(8, 1e8, block.timestamp);
-
-            familyId = registry.createFamily("family.starwallet.eth");
-            bytes32 registration =
-                registry.proposeChildRegistration(familyId, CHILD, "child.family.starwallet.eth");
-            VM.prank(CHILD);
-            childId = registry.acceptChildRegistration(registration);
-
-            vault = new StarFamilyVault(
-                familyId,
-                address(usdc),
-                address(weth),
-                address(registry),
-                address(star),
-                address(aqua),
-                SWAP_VM,
-                address(this),
-                _safety()
-            );
-            star.grantRole(star.VAULT_FACTORY_ROLE(), address(this));
-            star.grantRole(star.MINTER_ROLE(), address(vault));
-
-            usdc.mint(address(this), 100_000_000);
-            weth.mint(address(this), 10 ether);
-            usdc.approve(address(vault), type(uint256).max);
-            weth.approve(address(vault), type(uint256).max);
-        }
-
-        function testRewardsStarsAndAccountsForMatchingUsdc() public {
-            uint256 rewardId = vault.rewardStars(childId, 12, "Finished homework");
-            StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
-
-            require(rewardId == 1 && vault.nextRewardId() == 2, "reward id");
-            require(star.balanceOf(CHILD) == 12, "stars minted");
-            require(account.totalPrincipalContributed == 12_000_000, "principal");
-            require(account.availableUsdc == 12_000_000, "idle USDC");
-            require(vault.principalContributedByChild(childId) == 12_000_000, "child principal");
-            require(usdc.balanceOf(address(vault)) == 12_000_000, "vault balance");
-        }
-
-        function testWithdrawsUsdcAndTracksPrincipal() public {
-            vault.rewardStars(childId, 10, "Finished homework");
-            vault.withdrawSavings(4_000_000, RECIPIENT);
-            StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
-
-            require(usdc.balanceOf(RECIPIENT) == 4_000_000, "recipient balance");
-            require(account.availableUsdc == 6_000_000, "remaining USDC");
-            require(account.totalPrincipalWithdrawn == 4_000_000, "withdrawn principal");
-            require(account.totalUsdcWithdrawn == 4_000_000, "withdrawn USDC");
-            require(vault.netPrincipal() == 6_000_000, "net principal");
-        }
-
-        function testFundsAndWithdrawsIdleWeth() public {
-            vault.fundStrategyWeth(2 ether);
-            require(vault.getFamilyAccount().availableWeth == 2 ether, "idle WETH");
-
-            vault.withdrawStrategyWeth(0.75 ether, RECIPIENT);
-            StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
-            require(account.availableWeth == 1.25 ether, "remaining WETH");
-            require(account.totalWethWithdrawn == 0.75 ether, "withdrawn WETH");
-            require(weth.balanceOf(RECIPIENT) == 0.75 ether, "recipient WETH");
-        }
-
-        function testRestrictsFundingAndWithdrawalsToFamilyParent() public {
-            VM.prank(OTHER);
-            VM.expectPartialRevert(StarFamilyVault.NotFamilyParent.selector);
-            vault.fundStrategyWeth(1 ether);
-
-            vault.rewardStars(childId, 1, "Finished homework");
-            VM.prank(OTHER);
-            VM.expectPartialRevert(StarFamilyVault.NotFamilyParent.selector);
-            vault.withdrawSavings(1_000_000, OTHER);
-        }
-
-        function testRejectsInactiveFundingAndUnavailableBalances() public {
-            registry.setFamilyStatus(familyId, false);
-            VM.expectPartialRevert(StarFamilyVault.FamilyInactive.selector);
-            vault.rewardStars(childId, 1, "Finished homework");
-            VM.expectPartialRevert(StarFamilyVault.FamilyInactive.selector);
-            vault.fundStrategyWeth(1 ether);
-
-            VM.expectPartialRevert(StarFamilyVault.InsufficientAvailableUsdc.selector);
-            vault.withdrawSavings(1, RECIPIENT);
-            VM.expectPartialRevert(StarFamilyVault.InsufficientAvailableWeth.selector);
-            vault.withdrawStrategyWeth(1, RECIPIENT);
-        }
-
-        function testShipsInspectsAndDocksSavingsPosition() public {
-            vault.rewardStars(childId, 10, "Finished homework");
-            vault.fundStrategyWeth(2 ether);
-            bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
-            bytes32 strategyHash = vault.shipSavingsPosition(strategy, 4_000_000, 0.75 ether);
-
-            StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
-            require(strategyHash == keccak256(strategy), "strategy hash");
-            require(
-                account.positionActive && account.strategyHash == strategyHash, "active position"
-            );
-            require(account.positionOpeningUsdc == 4_000_000, "opening USDC");
-            require(account.positionOpeningWeth == 0.75 ether, "opening WETH");
-            require(account.availableUsdc == 6_000_000, "idle USDC");
-            require(account.availableWeth == 1.25 ether, "idle WETH");
-
-            (uint256 positionUsdc, uint256 positionWeth) = vault.currentPositionBalances();
-            require(positionUsdc == 4_000_000 && positionWeth == 0.75 ether, "position balances");
-
-            vault.dockSavingsPosition();
-            account = vault.getFamilyAccount();
-            require(!account.positionActive && account.strategyHash == bytes32(0), "docked");
-            require(account.availableUsdc == 10_000_000, "restored USDC");
-            require(account.availableWeth == 2 ether, "restored WETH");
-        }
-
-        function testReplacesExistingPositionAtomically() public {
-            vault.rewardStars(childId, 10, "Finished homework");
-            vault.fundStrategyWeth(2 ether);
-            bytes memory first = _strategy(30, 1, uint40(block.timestamp + 900));
-            bytes memory second = _strategy(30, 2, uint40(block.timestamp + 900));
-            bytes32 firstHash = vault.shipSavingsPosition(first, 4_000_000, 0.75 ether);
-
-            (bytes32 oldHash, bytes32 newHash) =
-                vault.replaceSavingsPosition(second, 6_000_000, 1 ether);
-            StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
-            require(oldHash == firstHash && newHash == keccak256(second), "replacement hashes");
-            require(account.positionActive && account.strategyHash == newHash, "replacement active");
-            require(account.availableUsdc == 4_000_000, "replacement USDC");
-            require(account.availableWeth == 1 ether, "replacement WETH");
-        }
-
-        function testRejectsInvalidPositionLifecycle() public {
-            vault.rewardStars(childId, 2, "Finished homework");
-            vault.fundStrategyWeth(1 ether);
-            bytes memory first = _strategy(30, 1, uint40(block.timestamp + 900));
-            bytes memory second = _strategy(30, 2, uint40(block.timestamp + 900));
-
-            VM.expectRevert(StarFamilyVault.InvalidStrategy.selector);
-            vault.shipSavingsPosition("", 1_000_000, 0.5 ether);
-            vault.shipSavingsPosition(first, 1_000_000, 0.5 ether);
-            VM.expectPartialRevert(StarFamilyVault.PositionAlreadyActive.selector);
-            vault.shipSavingsPosition(second, 1_000_000, 0.5 ether);
-
-            vault.dockSavingsPosition();
-            VM.expectRevert(StarFamilyVault.PositionNotActive.selector);
-            vault.currentPositionBalances();
-        }
-
-        function testInspectsCanonicalStrategyParameters() public view {
-            uint40 deadline = uint40(block.timestamp + 900);
-            StarFamilyVault.StrategyParameters memory parameters =
-                vault.inspectSavingsStrategy(_strategy(30, 77, deadline));
-
-            require(parameters.sqrtPriceMin < parameters.sqrtPriceMax, "price range");
-            require(parameters.oracleRawPrice == vault.currentOracleRawPrice(), "oracle price");
-            require(parameters.feeBps == 30, "fee");
-            require(parameters.salt == 77, "salt");
-            require(parameters.deadline == deadline, "deadline");
-        }
-
-        function testRejectsWrongMakerTraitsTokensAndProgram() public {
-            StarFamilyVault.SwapVmOrder memory order = abi.decode(
-                _strategy(30, 1, uint40(block.timestamp + 900)), (StarFamilyVault.SwapVmOrder)
-            );
-
-            order.maker = OTHER;
-            VM.expectPartialRevert(StarFamilyVault.InvalidStrategyMaker.selector);
-            vault.inspectSavingsStrategy(abi.encode(order));
-
-            order.maker = address(vault);
-            order.traits = 0;
-            VM.expectPartialRevert(StarFamilyVault.InvalidStrategyTraits.selector);
-            vault.inspectSavingsStrategy(abi.encode(order));
-
-            order.traits = vault.DEFAULT_AQUA_MAKER_TRAITS();
-            order.data[0] = order.data[0] ^ bytes1(0x01);
-            VM.expectRevert(StarFamilyVault.InvalidStrategyTokens.selector);
-            vault.inspectSavingsStrategy(abi.encode(order));
-
-            order = abi.decode(
-                _strategy(30, 1, uint40(block.timestamp + 900)), (StarFamilyVault.SwapVmOrder)
-            );
-            order.data[40] = 0x11;
-            VM.expectRevert(StarFamilyVault.InvalidStrategyProgram.selector);
-            vault.inspectSavingsStrategy(abi.encode(order));
-        }
-
-        function testRejectsInvalidFeeSaltPriceRangeAndDeadline() public {
-            bytes memory invalidFee = _strategy(1_001, 1, uint40(block.timestamp + 900));
-            bytes memory invalidSalt = _strategy(30, 0, uint40(block.timestamp + 900));
-            bytes memory invalidRange =
-                _strategyWithRange(30, 1, uint40(block.timestamp + 900), 2, 1);
-            bytes memory tooShort = _strategy(30, 1, uint40(block.timestamp + 59));
-            bytes memory tooLong = _strategy(30, 1, uint40(block.timestamp + 1_801));
-
-            VM.expectPartialRevert(StarFamilyVault.InvalidStrategyFee.selector);
-            vault.inspectSavingsStrategy(invalidFee);
-
-            VM.expectRevert(StarFamilyVault.InvalidStrategySalt.selector);
-            vault.inspectSavingsStrategy(invalidSalt);
-
-            VM.expectPartialRevert(StarFamilyVault.InvalidStrategyPriceRange.selector);
-            vault.inspectSavingsStrategy(invalidRange);
-
-            VM.expectPartialRevert(StarFamilyVault.InvalidStrategyDeadline.selector);
-            vault.inspectSavingsStrategy(tooShort);
-
-            VM.expectPartialRevert(StarFamilyVault.StrategyDeadlineTooFar.selector);
-            vault.inspectSavingsStrategy(tooLong);
-        }
-
-        function testRejectsUnsafeOracleRoundsAndPriceRanges() public {
-            bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
-            uint256 rawPrice = vault.currentOracleRawPrice();
-            uint256 sqrtMin = Math.sqrt(rawPrice * 8_000 / 10_000 * 1e18, Math.Rounding.Ceil);
-            uint256 sqrtMax = Math.sqrt(rawPrice * 12_000 / 10_000 * 1e18);
-            bytes memory unsafeRange =
-                _strategyWithRange(30, 1, uint40(block.timestamp + 900), sqrtMin, sqrtMax);
-
-            ethFeed.setRound(2_000e8, block.timestamp - 3_601, 2);
-            VM.expectPartialRevert(StarFamilyVault.StaleOraclePrice.selector);
-            vault.inspectSavingsStrategy(strategy);
-
-            ethFeed.setRound(2_000e8, block.timestamp, 3);
-            VM.expectPartialRevert(StarFamilyVault.StrategyPriceOutsideOracleBounds.selector);
-            vault.inspectSavingsStrategy(unsafeRange);
-        }
-
-        function testEnforcesPositionExposureLimits() public {
-            vault.rewardStars(childId, 100, "Fund maximum position");
-            vault.fundStrategyWeth(10 ether);
-            bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
-
-            VM.expectPartialRevert(StarFamilyVault.PositionUsdcLimitExceeded.selector);
-            vault.shipSavingsPosition(strategy, 100_000_001, 1);
-            VM.expectPartialRevert(StarFamilyVault.PositionWethLimitExceeded.selector);
-            vault.shipSavingsPosition(strategy, 1, 10 ether + 1);
-        }
-
-        function testEmergencyPauseRevokesAllowancesAndRequiresDockBeforeResume() public {
-            vault.rewardStars(childId, 10, "Fund emergency test");
-            vault.fundStrategyWeth(1 ether);
-            bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
-            vault.shipSavingsPosition(strategy, 4_000_000, 0.5 ether);
-            bytes memory replacement = _strategy(30, 2, uint40(block.timestamp + 900));
-
-            vault.setAquaPaused(true);
-            require(vault.aquaPaused(), "not paused");
-            require(usdc.allowance(address(vault), address(aqua)) == 0, "USDC allowance");
-            require(weth.allowance(address(vault), address(aqua)) == 0, "WETH allowance");
-
-            VM.expectPartialRevert(StarFamilyVault.AquaOperationsPaused.selector);
-            vault.replaceSavingsPosition(replacement, 4_000_000, 0.5 ether);
-            VM.expectPartialRevert(StarFamilyVault.PositionMustBeDockedBeforeUnpause.selector);
-            vault.setAquaPaused(false);
-
-            vault.emergencyDockSavingsPosition();
-            require(!vault.getFamilyAccount().positionActive, "position not docked");
-            vault.setAquaPaused(false);
-            require(!vault.aquaPaused(), "not resumed");
-            require(
-                usdc.allowance(address(vault), address(aqua)) == type(uint256).max,
-                "USDC allowance not restored"
-            );
-            require(
-                weth.allowance(address(vault), address(aqua)) == type(uint256).max,
-                "WETH allowance not restored"
-            );
-        }
-
-        function testPauseAndEmergencyDockRequireEmergencyAdmin() public {
-            VM.prank(OTHER);
-            VM.expectPartialRevert(StarFamilyVault.NotEmergencyAdmin.selector);
-            vault.setAquaPaused(true);
-
-            VM.expectRevert(StarFamilyVault.AquaOperationsNotPaused.selector);
-            vault.emergencyDockSavingsPosition();
-        }
-
-        function testParentCanDockWhilePausedAndFamilyInactive() public {
-            vault.rewardStars(childId, 10, "Fund safe exit test");
-            vault.fundStrategyWeth(1 ether);
-            vault.shipSavingsPosition(
-                _strategy(30, 1, uint40(block.timestamp + 900)), 4_000_000, 0.5 ether
-            );
-            vault.setAquaPaused(true);
-            registry.setFamilyStatus(familyId, false);
-
-            vault.dockSavingsPosition();
-            require(!vault.getFamilyAccount().positionActive, "parent exit blocked");
-        }
-
-        function testCannotReuseDockedStrategyHash() public {
-            vault.rewardStars(childId, 2, "Finished homework");
-            vault.fundStrategyWeth(1 ether);
-            bytes memory strategy = _strategy(30, 1, uint40(block.timestamp + 900));
-            bytes32 strategyHash = vault.shipSavingsPosition(strategy, 1_000_000, 0.5 ether);
-            vault.dockSavingsPosition();
-
-            require(vault.strategyHashUsed(strategyHash), "strategy not recorded");
-            VM.expectPartialRevert(StarFamilyVault.StrategyHashAlreadyUsed.selector);
-            vault.shipSavingsPosition(strategy, 1_000_000, 0.5 ether);
-        }
-
-        function _strategy(uint16 feeBps, uint64 salt, uint40 deadline)
-            private
-            view
-            returns (bytes memory)
-        {
-            uint256 rawPrice = vault.currentOracleRawPrice();
-            return _strategyWithRange(
-                feeBps,
-                salt,
-                deadline,
-                Math.sqrt(rawPrice * 9_500 / 10_000 * 1e18, Math.Rounding.Ceil),
-                Math.sqrt((rawPrice * 10_500 + 9_999) / 10_000 * 1e18)
-            );
-        }
-
-        function _safety() private view returns (StarFamilyVault.AquaSafetyConfig memory) {
-            return StarFamilyVault.AquaSafetyConfig({
-                ethUsdFeed: address(ethFeed),
-                usdcUsdFeed: address(usdcFeed),
-                ethUsdMaxAgeSeconds: 3_600,
-                usdcUsdMaxAgeSeconds: 90_000,
-                maxStrategyPriceDeviationBps: 1_000,
-                maxStrategyLifetimeSeconds: 1_800,
-                maxPositionUsdc: 100_000_000,
-                maxPositionWeth: 10 ether
+    contract MockRegistry is IStarRegistry {
+        Family private family;
+        Child private child;
+
+        constructor(address parent) {
+            family = Family({
+                id: 1, parent: parent, ensNode: bytes32(0), ensName: "family.eth", active: true
+            });
+            child = Child({
+                id: 1,
+                familyId: 1,
+                wallet: address(0xCAFE),
+                ensNode: bytes32(0),
+                ensName: "child.family.eth",
+                active: true
             });
         }
 
-        function _strategyWithRange(
-            uint16 feeBps,
-            uint64 salt,
-            uint40 deadline,
-            uint256 sqrtPriceMin,
-            uint256 sqrtPriceMax
-        ) private view returns (bytes memory) {
-            bytes memory program = abi.encodePacked(bytes1(0x20), bytes1(uint8(5)), deadline);
-            if (feeBps != 0) {
-                program = bytes.concat(
-                    program,
-                    abi.encodePacked(bytes1(0x70), bytes1(uint8(3)), uint24(feeBps) * 1_000)
-                );
-            }
-            program = bytes.concat(
-                program,
-                abi.encodePacked(
-                    bytes1(0x51),
-                    bytes1(uint8(64)),
-                    sqrtPriceMin,
-                    sqrtPriceMax,
-                    bytes1(0x02),
-                    bytes1(uint8(8)),
-                    salt
-                )
-            );
-            (address tokenLt, address tokenGt) = address(usdc) < address(weth)
-                ? (address(usdc), address(weth))
-                : (address(weth), address(usdc));
-            return abi.encode(
-                StarFamilyVault.SwapVmOrder({
-                    maker: address(vault),
-                    traits: DEFAULT_MAKER_TRAITS,
-                    data: bytes.concat(bytes20(tokenLt), bytes20(tokenGt), program)
-                })
-            );
+        function getFamily(uint256) external view returns (Family memory) {
+            return family;
+        }
+
+        function setActive(bool active) external {
+            family.active = active;
+        }
+
+        function getFamilyIdsByParent(address) external pure returns (uint256[] memory ids) {
+            ids = new uint256[](1);
+            ids[0] = 1;
+        }
+
+        function getChild(uint256) external view returns (Child memory) {
+            return child;
+        }
+
+        function getChildByWallet(address) external view returns (Child memory) {
+            return child;
+        }
+
+        function isParentOf(address parent, address childWallet) external view returns (bool) {
+            return parent == family.parent && childWallet == child.wallet;
         }
     }
+
+    contract MockStar is IStarToken {
+        bytes32 public constant override MINTER_ROLE = keccak256("MINTER_ROLE");
+        mapping(address => uint256) public override balanceOf;
+
+        function grantRole(bytes32, address) external { }
+
+        function mint(address account, uint256 amount) external {
+            balanceOf[account] += amount;
+        }
+
+        function burnFrom(address account, uint256 amount) external {
+            balanceOf[account] -= amount;
+        }
+    }
+
+        contract MockAqua is IAqua {
+            address public failingPushToken;
+
+            function setFailingPushToken(address token) external {
+                failingPushToken = token;
+            }
+
+            function push(address maker, address app, bytes32 hash, address token, uint256 amount) external {
+                require(token != failingPushToken, "push failed");
+                balance[maker][app][hash][token] += amount;
+                require(MockERC20(token).transferFrom(msg.sender, maker, amount), "transfer failed");
+            }
+            mapping(
+                address maker
+                    => mapping(
+                    address app => mapping(bytes32 hash => mapping(address token => uint256))
+                )
+            ) public balance;
+
+            function setBalance(address maker, address app, bytes32 hash, address token, uint256 amount) external {
+                balance[maker][app][hash][token] = amount;
+            }
+
+            function ship(
+                address app,
+                bytes calldata strategy,
+                address[] calldata tokens,
+                uint256[] calldata amounts
+            ) external returns (bytes32 strategyHash) {
+                require(tokens.length == amounts.length, "length");
+                strategyHash = keccak256(strategy);
+                for (uint256 i; i < tokens.length; ++i) {
+                    balance[msg.sender][app][strategyHash][tokens[i]] = amounts[i];
+                }
+            }
+
+            function dock(address app, bytes32 strategyHash, address[] calldata tokens) external {
+                for (uint256 i; i < tokens.length; ++i) {
+                    balance[msg.sender][app][strategyHash][tokens[i]] = 0;
+                }
+            }
+
+            function safeBalances(
+                address maker,
+                address app,
+                bytes32 strategyHash,
+                address token0,
+                address token1
+            ) external view returns (uint256 balance0, uint256 balance1) {
+                return (
+                    balance[maker][app][strategyHash][token0],
+                    balance[maker][app][strategyHash][token1]
+                );
+            }
+        }
+
+        contract StarFamilyVaultTest {
+            Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+            uint256 private constant ORACLE_RAW_PRICE = 2_000_000_000;
+            uint256 private constant MAX_USDC = 1_000_000_000;
+            uint256 private constant MAX_WETH = 500_000_000_000_000_000;
+
+            MockERC20 private usdc;
+            MockERC20 private weth;
+            MockFeed private ethFeed;
+            MockFeed private usdcFeed;
+            MockAqua private aqua;
+            MockRegistry private registry;
+            MockStar private star;
+            StarFamilyVault private vault;
+            address private constant SWAP_VM = address(0x1111);
+
+            function setUp() public {
+                vm.warp(1_000_000);
+
+                MockERC20 first = new MockERC20();
+                MockERC20 second = new MockERC20();
+                if (address(first) < address(second)) {
+                    weth = first;
+                    usdc = second;
+                } else {
+                    weth = second;
+                    usdc = first;
+                }
+                weth.setDecimals(18);
+                usdc.setDecimals(6);
+
+                ethFeed = new MockFeed(8, 2_000e8, block.timestamp);
+                usdcFeed = new MockFeed(8, 1e8, block.timestamp);
+                aqua = new MockAqua();
+                registry = new MockRegistry(address(this));
+                star = new MockStar();
+                vault = new StarFamilyVault(
+                    1,
+                    address(usdc),
+                    address(weth),
+                    address(registry),
+                    address(star),
+                    address(aqua),
+                    SWAP_VM,
+                    address(this),
+                    _safety(),
+                    new StarQuestsFactory()
+                );
+
+                usdc.mint(address(this), MAX_USDC);
+                usdc.approve(address(vault), type(uint256).max);
+                vault.rewardStars(1, 1_000, "test funding");
+                weth.mint(address(this), MAX_WETH);
+                weth.approve(address(vault), type(uint256).max);
+                vault.fundStrategyWeth(MAX_WETH);
+            }
+
+            function testOracleRawPriceUsesTokenDecimals() public view {
+                require(vault.currentOracleRawPrice() == ORACLE_RAW_PRICE, "wrong raw price");
+            }
+
+            function testValidStrategyParsesDeadlinePriceFeeAndSalt() public view {
+                uint40 deadline = uint40(block.timestamp + 900);
+                StarFamilyVault.StrategyParameters memory parameters = vault.inspectSavingsStrategy(
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 77, deadline)
+                );
+                require(parameters.deadline == deadline, "deadline");
+                require(parameters.feeBps == 30, "fee");
+                require(parameters.salt == 77, "salt");
+                require(parameters.oracleRawPrice == ORACLE_RAW_PRICE, "oracle");
+            }
+
+            function testRejectsCatastrophicallyMisScaledPrice() public {
+                vm.expectPartialRevert(StarFamilyVault.StrategyPriceOutsideOracleBounds.selector);
+                vault.inspectSavingsStrategy(
+                    _strategy(2_000e18, 2_100e18, 30, 1, uint40(block.timestamp + 900))
+                );
+            }
+
+            function testRejectsWrongMakerTraitsAndProgram() public {
+                bytes memory encoded =
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900));
+                StarFamilyVault.SwapVmOrder memory order =
+                    abi.decode(encoded, (StarFamilyVault.SwapVmOrder));
+
+                order.maker = address(0xBAD);
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyMaker.selector);
+                vault.inspectSavingsStrategy(abi.encode(order));
+
+                order.maker = address(vault);
+                order.traits = 0;
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyTraits.selector);
+                vault.inspectSavingsStrategy(abi.encode(order));
+
+                order.traits = vault.DEFAULT_AQUA_MAKER_TRAITS();
+                order.data[40] = bytes1(0x11);
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyProgram.selector);
+                vault.inspectSavingsStrategy(abi.encode(order));
+            }
+
+            function testRejectsExpiredOrExcessivelyLongStrategy() public {
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyDeadline.selector);
+                vault.inspectSavingsStrategy(
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 59))
+                );
+
+                vm.expectPartialRevert(StarFamilyVault.StrategyDeadlineTooFar.selector);
+                vault.inspectSavingsStrategy(
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 2, uint40(block.timestamp + 1_801))
+                );
+            }
+
+            function testRejectsLegacyTraitsAndForeignTokenPrefix() public {
+                bytes memory encoded =
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900));
+                StarFamilyVault.SwapVmOrder memory order =
+                    abi.decode(encoded, (StarFamilyVault.SwapVmOrder));
+                order.traits = uint256(1) << 254;
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyTraits.selector);
+                vault.inspectSavingsStrategy(abi.encode(order));
+                order.traits = vault.DEFAULT_AQUA_MAKER_TRAITS();
+                order.data[0] = order.data[0] ^ bytes1(0x01);
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyTokens.selector);
+                vault.inspectSavingsStrategy(abi.encode(order));
+                order.data = hex"01";
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyTokens.selector);
+                vault.inspectSavingsStrategy(abi.encode(order));
+            }
+
+            function testRejectsNoncanonicalFeeUnitsAndZeroSalt() public {
+                bytes memory encoded =
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900));
+                StarFamilyVault.SwapVmOrder memory order =
+                    abi.decode(encoded, (StarFamilyVault.SwapVmOrder));
+                order.data[51] = bytes1(uint8(order.data[51]) + 1);
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategyFee.selector);
+                vault.inspectSavingsStrategy(abi.encode(order));
+                vm.expectPartialRevert(StarFamilyVault.InvalidStrategySalt.selector);
+                vault.inspectSavingsStrategy(
+                    _strategy(1_900_000_000, 2_100_000_000, 0, 0, uint40(block.timestamp + 900))
+                );
+            }
+
+            function testFuzzUpstreamOrderBuilderMatchesVault(uint16 fee, uint64 salt) public view {
+                fee = fee % 1_001;
+                if (salt == 0) salt = 1;
+                StarFamilyVault.StrategyParameters memory parameters = vault.inspectSavingsStrategy(
+                    _strategy(
+                        1_900_000_000, 2_100_000_000, fee, salt, uint40(block.timestamp + 900)
+                    )
+                );
+                require(parameters.feeBps == fee && parameters.salt == salt, "parameters mismatch");
+            }
+
+            function testRejectsStaleFutureAndIncompleteOracleRounds() public {
+                ethFeed.setRound(2_000e8, block.timestamp - 3_601, 2);
+                vm.expectPartialRevert(StarFamilyVault.StaleOraclePrice.selector);
+                vault.currentOracleRawPrice();
+
+                ethFeed.setRound(2_000e8, block.timestamp + 1, 3);
+                vm.expectPartialRevert(StarFamilyVault.InvalidOracleTimestamp.selector);
+                vault.currentOracleRawPrice();
+
+                ethFeed.setRound(2_000e8, block.timestamp, 0);
+                vm.expectPartialRevert(StarFamilyVault.InvalidOracleRound.selector);
+                vault.currentOracleRawPrice();
+
+                ethFeed.setRound(0, block.timestamp, 4);
+                vm.expectPartialRevert(StarFamilyVault.InvalidOracleAnswer.selector);
+                vault.currentOracleRawPrice();
+            }
+
+            function testFuzzSepoliaTokenOrderAndMaximumBand(uint16 band) public {
+                // Reassign mock decimals: the smaller address is USDC, as on Sepolia.
+                weth.setDecimals(6);
+                usdc.setDecimals(18);
+                StarFamilyVault reciprocal = new StarFamilyVault(
+                    1,
+                    address(weth),
+                    address(usdc),
+                    address(registry),
+                    address(star),
+                    address(aqua),
+                    SWAP_VM,
+                    address(this),
+                    _safety(),
+                    new StarQuestsFactory()
+                );
+                uint256 price = 500_000_000_000_000_000_000_000_000;
+                require(reciprocal.currentOracleRawPrice() == price, "reciprocal 6/18 price");
+                uint256 bps = 25 + uint256(band) % 976;
+                bytes memory strategy = ConnectorReference.buildOrder(
+                    address(reciprocal),
+                    address(weth),
+                    address(usdc),
+                    price * (10_000 - bps) / 10_000,
+                    price * (10_000 + bps) / 10_000,
+                    30,
+                    1,
+                    uint40(block.timestamp + 900)
+                );
+                require(
+                    reciprocal.inspectSavingsStrategy(strategy).oracleRawPrice == price,
+                    "reciprocal bounds"
+                );
+            }
+
+            function testPositionExposureCapsAreEnforced() public {
+                bytes memory strategy =
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900));
+
+                vm.expectPartialRevert(StarFamilyVault.PositionUsdcLimitExceeded.selector);
+                vault.shipSavingsPosition(strategy, MAX_USDC + 1, 1);
+
+                vm.expectPartialRevert(StarFamilyVault.PositionWethLimitExceeded.selector);
+                vault.shipSavingsPosition(strategy, 1, MAX_WETH + 1);
+            }
+
+            function testShipAndDockPreserveAccountedInventory() public {
+                bytes memory strategy =
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900));
+                vault.shipSavingsPosition(strategy, 100e6, 0.05e18);
+
+                (uint256 positionUsdc, uint256 positionWeth) = vault.currentPositionBalances();
+                require(positionUsdc == 100e6 && positionWeth == 0.05e18, "shipped balances");
+
+                vault.dockSavingsPosition();
+                StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
+                require(!account.positionActive, "still active");
+                require(account.availableUsdc == MAX_USDC, "USDC accounting");
+                require(account.availableWeth == MAX_WETH, "WETH accounting");
+            }
+
+            function testEmergencyPauseRevokesBeforeSeparateDockAndBlocksUnsafeResume() public {
+                bytes memory strategy =
+                    _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900));
+                vault.shipSavingsPosition(strategy, 100e6, 0.05e18);
+
+                vault.setAquaPaused(true);
+                StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
+                require(vault.aquaPaused(), "not paused");
+                require(account.positionActive, "pause unexpectedly docked");
+                require(usdc.allowance(address(vault), address(aqua)) == 0, "USDC allowance");
+                require(weth.allowance(address(vault), address(aqua)) == 0, "WETH allowance");
+
+                vm.expectPartialRevert(StarFamilyVault.PositionMustBeDockedBeforeUnpause.selector);
+                vault.setAquaPaused(false);
+
+                vault.emergencyDockSavingsPosition();
+                account = vault.getFamilyAccount();
+                require(!account.positionActive, "position not docked");
+
+                vault.setAquaPaused(false);
+                require(!vault.aquaPaused(), "not resumed");
+                require(
+                    usdc.allowance(address(vault), address(aqua)) == type(uint256).max,
+                    "USDC allowance not restored"
+                );
+                require(
+                    weth.allowance(address(vault), address(aqua)) == type(uint256).max,
+                    "WETH allowance not restored"
+                );
+            }
+
+            function testCannotAddByShippingAgainAndReplacementCreatesANewPosition() public {
+                bytes memory first = _strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900));
+                bytes memory second = _strategy(1_900_000_000, 2_100_000_000, 30, 2, uint40(block.timestamp + 900));
+                bytes32 original = vault.shipSavingsPosition(first, 100e6, 0.05e18);
+                vm.expectPartialRevert(StarFamilyVault.PositionAlreadyActive.selector);
+                vault.shipSavingsPosition(second, 50e6, 0.01e18);
+                (bytes32 oldHash, bytes32 newHash) = vault.replaceSavingsPosition(second, 150e6, 0.06e18);
+                require(oldHash == original && newHash != oldHash, "replacement must be a new position");
+                StarFamilyVault.FamilyAccount memory account = vault.getFamilyAccount();
+                require(account.positionActive && account.strategyHash == newHash, "one replacement active");
+                require(account.availableUsdc == MAX_USDC - 150e6, "replacement USDC accounting");
+                require(account.availableWeth == MAX_WETH - 0.06e18, "replacement WETH accounting");
+                require(aqua.balance(address(vault), SWAP_VM, oldHash, address(usdc)) == 0, "old position docked");
+            }
+
+            function testParentCanCloseWhilePausedAndInactiveButOtherWalletsCannot() public {
+                vault.shipSavingsPosition(_strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900)), 100e6, 0.05e18);
+                vault.setAquaPaused(true);
+                registry.setActive(false);
+                vm.startPrank(address(0xCAFE));
+                vm.expectPartialRevert(StarFamilyVault.NotFamilyParent.selector);
+                vault.dockSavingsPosition();
+                vm.stopPrank();
+                vault.dockSavingsPosition();
+                require(!vault.getFamilyAccount().positionActive, "parent must be able to close");
+                vm.expectPartialRevert(StarFamilyVault.PositionNotActive.selector);
+                vault.dockSavingsPosition();
+            }
+
+            function testAquaPushAddsParentWalletFundsWithoutUsingAvailableVaultInventory() public {
+                Aqua actualAqua = new Aqua();
+                StarFamilyVault actualVault = new StarFamilyVault(
+                    1, address(usdc), address(weth), address(registry), address(star),
+                    address(actualAqua), SWAP_VM, address(this), _safety(), new StarQuestsFactory()
+                );
+                usdc.mint(address(this), 100e6);
+                weth.mint(address(this), 0.05e18);
+                usdc.approve(address(actualVault), 100e6);
+                weth.approve(address(actualVault), 0.05e18);
+                actualVault.rewardStars(1, 100, "fund real Aqua test");
+                actualVault.fundStrategyWeth(0.05e18);
+                bytes memory strategy = ConnectorReference.buildOrder(
+                    address(actualVault), address(weth), address(usdc),
+                    1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900)
+                );
+                bytes32 hash = actualVault.shipSavingsPosition(strategy, 20e6, 0.01e18);
+                StarFamilyVault.FamilyAccount memory beforePush = actualVault.getFamilyAccount();
+                uint256 childStars = star.balanceOf(address(0xCAFE));
+                usdc.mint(address(this), 5e6);
+                usdc.approve(address(actualAqua), 5e6);
+                actualAqua.push(address(actualVault), SWAP_VM, hash, address(usdc), 5e6);
+                (uint256 currentUsdc, uint256 currentWeth) = actualVault.currentPositionBalances();
+                StarFamilyVault.FamilyAccount memory afterPush = actualVault.getFamilyAccount();
+                require(currentUsdc == 25e6 && currentWeth == 0.01e18, "top up existing strategy");
+                require(afterPush.strategyHash == hash && afterPush.positionActive, "same active position");
+                require(afterPush.availableUsdc == beforePush.availableUsdc, "idle vault USDC not used");
+                require(afterPush.availableWeth == beforePush.availableWeth, "idle vault WETH not used");
+                require(afterPush.totalPrincipalContributed == beforePush.totalPrincipalContributed, "not a Star principal contribution");
+                require(star.balanceOf(address(0xCAFE)) == childStars, "top up does not mint Stars");
+                require(usdc.balanceOf(address(this)) == 0, "top up paid from parent wallet");
+                actualVault.dockSavingsPosition();
+                require(actualVault.getFamilyAccount().availableUsdc == 105e6, "close includes parent top up");
+            }
+
+            function testCloseReturnsCurrentBalancesWithoutWithdrawalOrChangingStars() public {
+                bytes32 hash = vault.shipSavingsPosition(_strategy(1_900_000_000, 2_100_000_000, 30, 1, uint40(block.timestamp + 900)), 100e6, 0.05e18);
+                StarFamilyVault.FamilyAccount memory beforeClose = vault.getFamilyAccount();
+                uint256 childStars = star.balanceOf(address(0xCAFE));
+                uint256 parentUsdc = usdc.balanceOf(address(this));
+                uint256 parentWeth = weth.balanceOf(address(this));
+                aqua.setBalance(address(vault), SWAP_VM, hash, address(usdc), 110e6);
+                aqua.setBalance(address(vault), SWAP_VM, hash, address(weth), 0.045e18);
+                vault.dockSavingsPosition();
+                StarFamilyVault.FamilyAccount memory afterClose = vault.getFamilyAccount();
+                require(afterClose.availableUsdc == beforeClose.availableUsdc + 110e6, "use current USDC");
+                require(afterClose.availableWeth == beforeClose.availableWeth + 0.045e18, "use current WETH");
+                require(!afterClose.positionActive && afterClose.strategyHash == bytes32(0), "clear position");
+                require(afterClose.positionOpeningUsdc == 0 && afterClose.positionOpeningWeth == 0, "clear opening amounts");
+                require(afterClose.totalPrincipalWithdrawn == beforeClose.totalPrincipalWithdrawn, "no principal withdrawal");
+                require(afterClose.totalUsdcWithdrawn == beforeClose.totalUsdcWithdrawn, "no USDC withdrawal");
+                require(afterClose.totalWethWithdrawn == beforeClose.totalWethWithdrawn, "no WETH withdrawal");
+                require(star.balanceOf(address(0xCAFE)) == childStars, "Stars unchanged");
+                require(usdc.balanceOf(address(this)) == parentUsdc, "no parent USDC transfer");
+                require(weth.balanceOf(address(this)) == parentWeth, "no parent WETH transfer");
+            }
+
+            function _safety() private view returns (StarFamilyVault.AquaSafetyConfig memory) {
+                return StarFamilyVault.AquaSafetyConfig({
+                    ethUsdFeed: address(ethFeed),
+                    usdcUsdFeed: address(usdcFeed),
+                    ethUsdMaxAgeSeconds: 3_600,
+                    usdcUsdMaxAgeSeconds: 90_000,
+                    maxStrategyPriceDeviationBps: 1_000,
+                    maxStrategyLifetimeSeconds: 1_800,
+                    maxPositionUsdc: MAX_USDC,
+                    maxPositionWeth: MAX_WETH
+                });
+            }
+
+            function _strategy(
+                uint256 rawPriceMin,
+                uint256 rawPriceMax,
+                uint16 feeBps,
+                uint64 salt,
+                uint40 deadline
+            ) private view returns (bytes memory) {
+                return ConnectorReference.buildOrder(
+                    address(vault),
+                    address(weth),
+                    address(usdc),
+                    rawPriceMin,
+                    rawPriceMax,
+                    feeBps,
+                    salt,
+                    deadline
+                );
+            }
+        }
+
+        contract StarFamilyVaultSepoliaForkTest {
+            Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+            address private constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
+            address private constant WETH = 0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9;
+            address private AQUA;
+            address private SWAP_VM;
+            address private constant ETH_USD = 0x694AA1769357215DE4FAC081bf1f309aDC325306;
+            address private constant USDC_USD = 0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E;
+            address private constant TAKER = address(0xBEEF);
+            string private rpcUrl;
+
+            function setUp() public {
+                rpcUrl = vm.envOr("SEPOLIA_FORK_RPC_URL", string(""));
+            }
+
+            function testForkVendoredSwapVmQuotesExpiringAquaStrategy() public {
+                if (bytes(rpcUrl).length == 0) {
+                    vm.skip(true);
+                    return;
+                }
+                vm.createSelectFork(rpcUrl);
+                require(block.chainid == 11155111, "Ethereum Sepolia required");
+                AQUA = address(new Aqua());
+                SWAP_VM = address(new AquaSwapVMRouter(AQUA, WETH, address(this), "SwapVM", "1"));
+
+                MockRegistry registry = new MockRegistry(address(this));
+                MockStar star = new MockStar();
+                StarFamilyVault.AquaSafetyConfig memory safety = StarFamilyVault.AquaSafetyConfig({
+                    ethUsdFeed: ETH_USD,
+                    usdcUsdFeed: USDC_USD,
+                    ethUsdMaxAgeSeconds: 3_600,
+                    usdcUsdMaxAgeSeconds: 90_000,
+                    maxStrategyPriceDeviationBps: 1_000,
+                    maxStrategyLifetimeSeconds: 1_800,
+                    maxPositionUsdc: 100e6,
+                    maxPositionWeth: 0.05e18
+                });
+                StarFamilyVault vault = new StarFamilyVault(
+                    1,
+                    USDC,
+                    WETH,
+                    address(registry),
+                    address(star),
+                    AQUA,
+                    SWAP_VM,
+                    address(this),
+                    safety,
+                    new StarQuestsFactory()
+                );
+
+                // Impersonation changes the local fork only, not Sepolia.
+                vm.startPrank(IForkUsdc(USDC).masterMinter());
+                require(IForkUsdc(USDC).configureMinter(address(this), 101e6), "fork minter setup");
+                vm.stopPrank();
+                require(IForkUsdc(USDC).mint(address(this), 100e6), "fork USDC funding");
+                require(IForkUsdc(USDC).mint(TAKER, 1e6), "fork taker funding");
+                ERC20(USDC).approve(address(vault), type(uint256).max);
+                vault.rewardStars(1, 100, "fork funding");
+                vm.deal(address(this), 0.05e18);
+                IWeth(WETH).deposit{ value: 0.05e18 }();
+                ERC20(WETH).approve(address(vault), type(uint256).max);
+                vault.fundStrategyWeth(0.05e18);
+
+                uint256 oracleRawPrice = vault.currentOracleRawPrice();
+                uint40 deadline = uint40(block.timestamp + 900);
+                bytes memory strategy = _forkStrategy(
+                    address(vault),
+                    oracleRawPrice * 9_500 / 10_000,
+                    (oracleRawPrice * 10_500 + 9_999) / 10_000,
+                    deadline
+                );
+                bytes32 strategyHash = vault.shipSavingsPosition(strategy, 100e6, 0.05e18);
+                require(strategyHash == keccak256(strategy), "fork strategy hash");
+
+                _executeBidirectionalSwaps(strategy, strategyHash);
+
+                vm.warp(deadline + 1);
+                vm.expectRevert();
+                ISwapVM(SWAP_VM)
+                    .quote(
+                        abi.decode(strategy, (ISwapVM.Order)),
+                        1e6,
+                        ConnectorReference.buildTaker(true, 0, 0)
+                    );
+
+                vault.setAquaPaused(true);
+                require(ERC20(USDC).allowance(address(vault), AQUA) == 0, "fork USDC allowance");
+                require(ERC20(WETH).allowance(address(vault), AQUA) == 0, "fork WETH allowance");
+                vault.emergencyDockSavingsPosition();
+                require(!vault.getFamilyAccount().positionActive, "fork emergency dock");
+            }
+
+            function _executeBidirectionalSwaps(bytes memory strategy, bytes32 strategyHash)
+                private
+            {
+                ISwapVM.Order memory order = abi.decode(strategy, (ISwapVM.Order));
+                (uint256 quotedIn, uint256 quotedOut, bytes32 quotedHash) =
+                    ISwapVM(SWAP_VM).quote(order, 1e6, ConnectorReference.buildTaker(true, 0, 0));
+                require(quotedIn == 1e6 && quotedOut > 0, "fork forward quote");
+                require(quotedHash == strategyHash, "fork forward quote hash");
+
+                uint256 takerWethBefore = ERC20(WETH).balanceOf(TAKER);
+                vm.startPrank(TAKER);
+                ERC20(USDC).approve(SWAP_VM, type(uint256).max);
+                (uint256 amountIn, uint256 amountOut, bytes32 swapHash) =
+                    ISwapVM(SWAP_VM).swap(order, 1e6, ConnectorReference.buildTaker(true, 0, 0));
+                vm.stopPrank();
+                require(amountIn == quotedIn && amountOut == quotedOut, "fork forward swap");
+                require(swapHash == strategyHash, "fork forward swap hash");
+                require(
+                    ERC20(WETH).balanceOf(TAKER) - takerWethBefore == amountOut,
+                    "fork taker WETH balance"
+                );
+
+                uint256 reverseAmountIn = amountOut / 2;
+                (quotedIn, quotedOut, quotedHash) = ISwapVM(SWAP_VM)
+                    .quote(order, reverseAmountIn, ConnectorReference.buildTaker(false, 0, 0));
+                require(quotedIn == reverseAmountIn && quotedOut > 0, "fork reverse quote");
+                require(quotedHash == strategyHash, "fork reverse quote hash");
+
+                uint256 takerUsdcBefore = ERC20(USDC).balanceOf(TAKER);
+                vm.startPrank(TAKER);
+                ERC20(WETH).approve(SWAP_VM, type(uint256).max);
+                (amountIn, amountOut, swapHash) = ISwapVM(SWAP_VM)
+                    .swap(order, reverseAmountIn, ConnectorReference.buildTaker(false, 0, 0));
+                vm.stopPrank();
+                require(amountIn == quotedIn && amountOut == quotedOut, "fork reverse swap");
+                require(swapHash == strategyHash, "fork reverse swap hash");
+                require(
+                    ERC20(USDC).balanceOf(TAKER) - takerUsdcBefore == amountOut,
+                    "fork taker USDC balance"
+                );
+            }
+
+            function _forkStrategy(
+                address maker,
+                uint256 rawPriceMin,
+                uint256 rawPriceMax,
+                uint40 deadline
+            ) private pure returns (bytes memory) {
+                return ConnectorReference.buildOrder(
+                    maker, USDC, WETH, rawPriceMin, rawPriceMax, 30, 1, deadline
+                );
+            }
+        }

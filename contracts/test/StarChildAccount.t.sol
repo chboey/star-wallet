@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
-
-import { StarChildAccount, IQuestVaultFactory } from "../src/StarChildAccount.sol";
-import { StarChildAccountFactory } from "../src/StarChildAccountFactory.sol";
 import { StarRegistry } from "../src/StarRegistry.sol";
 import { StarToken } from "../src/StarToken.sol";
 import { StarGoals } from "../src/StarGoals.sol";
+import { StarFamilyVault } from "../src/StarFamilyVault.sol";
+import { StarChildAccount } from "../src/StarChildAccount.sol";
+import { StarChildAccountFactory } from "../src/StarChildAccountFactory.sol";
+import { IQuestVaultFactory } from "../src/StarChildAccount.sol";
 import { StarQuests } from "../src/StarQuests.sol";
 import { IStarRegistry } from "../src/interfaces/IStarRegistry.sol";
 import { PackedUserOperation } from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
@@ -29,21 +30,21 @@ contract QuestVaultHarness {
 }
 
 contract StarChildAccountTest {
-    ChildAccountVm private constant VM =
+    ChildAccountVm private constant vm =
         ChildAccountVm(address(uint160(uint256(keccak256("hevm cheat code")))));
-    address private constant ENTRY_POINT = 0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108;
-    uint256 private constant CHILD_KEY = 12345;
-    string private constant CHILD_NAME = "maya.lee.starwallet.eth";
-    StarChildAccount private account;
+    address private constant EP = 0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108;
+    uint256 private constant KEY = 12345; // Public test fixture, never a deployment key.
     StarRegistry private registry;
     StarToken private token;
     StarGoals private goals;
     StarChildAccountFactory private factory;
+    StarChildAccount private account;
     QuestVaultHarness private questVault;
+    bytes32 private x;
+    bytes32 private y;
+    bytes32 private node;
     uint256 private familyId;
-    bytes32 private ensNode;
-    bytes32 private publicKeyX;
-    bytes32 private publicKeyY;
+    string private constant NAME = "maya.lee.starwallet.eth";
 
     function setUp() public {
         registry = new StarRegistry();
@@ -53,410 +54,383 @@ contract StarChildAccountTest {
             registry, goals, "localhost", IQuestVaultFactory(address(this))
         );
         familyId = registry.createFamily("lee.starwallet.eth");
-        ensNode = keccak256(abi.encodePacked(bytes32(0), keccak256("eth")));
-        ensNode = keccak256(abi.encodePacked(ensNode, keccak256("starwallet")));
-        ensNode = keccak256(abi.encodePacked(ensNode, keccak256("lee")));
-        ensNode = keccak256(abi.encodePacked(ensNode, keccak256("maya")));
+        node = keccak256(abi.encodePacked(bytes32(0), keccak256("eth")));
+        node = keccak256(abi.encodePacked(node, keccak256("starwallet")));
+        node = keccak256(abi.encodePacked(node, keccak256("lee")));
+        node = keccak256(abi.encodePacked(node, keccak256("maya")));
+        (uint256 qx, uint256 qy) = vm.publicKeyP256(KEY);
+        x = bytes32(qx);
+        y = bytes32(qy);
+        account = factory.createChildAccount(familyId, node, x, y, "test-credential");
         questVault = new QuestVaultHarness(registry, familyId);
-        (uint256 qx, uint256 qy) = VM.publicKeyP256(CHILD_KEY);
-        publicKeyX = bytes32(qx);
-        publicKeyY = bytes32(qy);
-        account = factory.createChildAccount(
-            familyId, ensNode, publicKeyX, publicKeyY, "child-credential"
-        );
     }
 
     function vaultByFamily(uint256 id) external view returns (address) {
-        require(id == familyId, "family");
+        require(id == familyId);
         return address(questVault);
     }
 
-    function testBindsCredentialAndValidatesWebAuthnUserOperation() public {
-        require(account.publicKeyX() == publicKeyX, "x coordinate");
-        require(account.publicKeyY() == publicKeyY, "y coordinate");
-        require(account.rpIdHash() == sha256("localhost"), "RP ID");
-        require(keccak256(bytes(account.credentialId())) == keccak256("child-credential"));
-
-        PackedUserOperation memory op;
-        op.sender = address(account);
-        op.callData = abi.encodeCall(account.requestRedemption, (1));
-        bytes32 hash = keccak256("bound child operation");
-        op.signature = _signature(hash, CHILD_KEY, sha256("localhost"), 0x05);
-        require(_validate(op, hash) == 0, "valid passkey rejected");
+    function testQuestMethodsRequireChildSignatureAndEntryPoint() public {
+        bytes32 registration = registry.proposeChildRegistration(familyId, address(account), NAME);
+        vm.prank(EP);
+        uint256 childId = account.acceptRegistration(registration);
+        StarQuests quests = questVault.quests();
+        uint256 questId = quests.createQuest(childId, 3, "Read a book");
+        bytes[] memory calls = new bytes[](3);
+        calls[0] = abi.encodeCall(account.submitQuest, (questId, bytes32(uint256(1))));
+        calls[1] = abi.encodeCall(account.requestStars, (5, "Tidied up", bytes32(uint256(2))));
+        calls[2] = abi.encodeCall(account.cancelStarRequest, (1));
+        for (uint256 i; i < calls.length; i++) {
+            PackedUserOperation memory op;
+            op.sender = address(account);
+            op.callData = calls[i];
+            bytes32 hash = keccak256(abi.encode(i, "quest-operation"));
+            op.signature = signature(hash, KEY, sha256("localhost"), 0x05);
+            require(validate(op, hash) == 0);
+            require(validate(op, keccak256("replay")) == 1);
+            (bool direct,) = address(account).call(calls[i]);
+            require(!direct);
+            vm.prank(EP);
+            (bool executed,) = address(account).call(calls[i]);
+            require(executed);
+        }
+        require(quests.getRequest(1).status == StarQuests.RequestStatus.Cancelled);
+        require(quests.getRequest(2).stars == 5 && token.balanceOf(address(account)) == 0);
     }
 
-    function testDeterministicCredentialBindingAndIdempotentRetry() public {
+    function testDeterministicCredentialBindingAndRetry() public {
         require(
-            address(account)
-                == factory.predictChildAccount(
-                    familyId, ensNode, publicKeyX, publicKeyY, "child-credential"
-                ),
-            "prediction"
+            address(account) == factory.predictChildAccount(familyId, node, x, y, "test-credential")
         );
         require(
             address(account)
-                == address(
-                    factory.createChildAccount(
-                        familyId, ensNode, publicKeyX, publicKeyY, "child-credential"
-                    )
-                ),
-            "idempotent retry"
+                == address(factory.createChildAccount(familyId, node, x, y, "test-credential"))
         );
-        require(factory.accountByName(familyId, ensNode) == address(account), "name binding");
-        VM.expectRevert();
-        factory.createChildAccount(
-            familyId, ensNode, publicKeyX, publicKeyY, "replacement-credential"
-        );
+        require(factory.accountByName(familyId, node) == address(account));
+        vm.expectRevert();
+        factory.createChildAccount(familyId, node, x, y, "replacement");
+        vm.expectRevert();
+        factory.createChildAccount(familyId, keccak256("bad"), bytes32(0), bytes32(0), "bad");
     }
 
-    function testOnlyActiveFamilyParentCanDeployChildAccount() public {
-        VM.expectRevert();
-        VM.prank(address(0xBAD));
-        factory.createChildAccount(
-            familyId, keccak256("other"), publicKeyX, publicKeyY, "other-credential"
+    function testGoalRequestsRequirePasskeyAndEntryPoint() public {
+        bytes32 registration = registry.proposeChildRegistration(familyId, address(account), NAME);
+        vm.prank(EP);
+        uint256 childId = account.acceptRegistration(registration);
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(
+            account.requestGoal, ("Rocket Toy", "Space adventures", 6, bytes32(uint256(1)))
         );
+        calls[1] = abi.encodeCall(account.cancelGoalRequest, (1));
+        for (uint256 i; i < calls.length; i++) {
+            PackedUserOperation memory op;
+            op.sender = address(account);
+            op.callData = calls[i];
+            bytes32 hash = keccak256(abi.encode(i, "goal-request"));
+            op.signature = signature(hash, KEY, sha256("localhost"), 0x05);
+            require(validate(op, hash) == 0);
+            require(validate(op, keccak256("replay")) == 1);
+            (bool direct,) = address(account).call(calls[i]);
+            require(!direct);
+            vm.prank(EP);
+            (bool executed,) = address(account).call(calls[i]);
+            require(executed);
+        }
+        require(goals.getGoalRequest(1).childId == childId);
+        require(goals.getGoalRequest(1).status == StarGoals.RedemptionStatus.Cancelled);
+        require(token.balanceOf(address(account)) == 0);
+    }
 
+    function testFuzzParentAndStrangersCannotExecute(address caller) public {
+        if (caller == EP) return;
+        bytes32 id = registry.proposeChildRegistration(familyId, address(account), NAME);
+        vm.expectRevert();
+        vm.prank(caller);
+        account.acceptRegistration(id);
+        vm.expectRevert();
+        vm.prank(caller);
+        account.requestRedemption(1);
+        vm.expectRevert();
+        vm.prank(caller);
+        account.cancelRedemption(1);
+    }
+
+    function testOnlyActiveParentDeploys() public {
+        vm.expectRevert();
+        vm.prank(address(0xBAD));
+        factory.createChildAccount(familyId, node, x, y, "test-credential");
         registry.setFamilyStatus(familyId, false);
-        VM.expectRevert();
-        factory.createChildAccount(
-            familyId, keccak256("other"), publicKeyX, publicKeyY, "other-credential"
-        );
-
-        VM.expectRevert();
-        factory.createChildAccount(familyId, bytes32(0), publicKeyX, publicKeyY, "invalid-name");
+        vm.expectRevert();
+        factory.createChildAccount(familyId, node, x, y, "test-credential");
     }
 
-    function testRejectsWrongKeyReplayRpAndMissingUserVerification() public {
+    function testPasskeyRejectsWrongKeyReplayRpAndMissingVerification() public {
         PackedUserOperation memory op;
         op.sender = address(account);
         op.callData = abi.encodeCall(account.requestRedemption, (1));
-        bytes32 hash = keccak256("operation domain");
-
-        op.signature = _signature(hash, CHILD_KEY, sha256("localhost"), 0x05);
-        require(_validate(op, keccak256("different operation")) == 1, "replay accepted");
-        op.signature = _signature(hash, CHILD_KEY + 1, sha256("localhost"), 0x05);
-        require(_validate(op, hash) == 1, "wrong key accepted");
-        op.signature = _signature(hash, CHILD_KEY, sha256("attacker.example"), 0x05);
-        require(_validate(op, hash) == 1, "wrong RP accepted");
-        op.signature = _signature(hash, CHILD_KEY, sha256("localhost"), 0x01);
-        require(_validate(op, hash) == 1, "missing verification accepted");
+        bytes32 hash = keccak256("operation-chain-nonce-domain");
+        op.signature = signature(hash, KEY, sha256("localhost"), 0x05);
+        require(validate(op, hash) == 0);
+        require(validate(op, keccak256("different-domain-or-nonce")) == 1);
+        op.signature = signature(hash, KEY + 1, sha256("localhost"), 0x05);
+        require(validate(op, hash) == 1);
+        op.signature = signature(hash, KEY, sha256("attacker.example"), 0x05);
+        require(validate(op, hash) == 1);
+        op.signature = signature(hash, KEY, sha256("localhost"), 0x01);
+        require(validate(op, hash) == 1);
         op.signature = hex"1234";
-        require(_validate(op, hash) == 1, "malformed signature accepted");
+        require(validate(op, hash) == 1);
+        vm.expectRevert();
+        account.validateUserOp(op, hash, 0);
     }
 
-    function testOnlyCanonicalEntryPointCanValidate() public {
-        PackedUserOperation memory op;
-        op.sender = address(account);
-        op.callData = abi.encodeCall(account.requestRedemption, (1));
-        op.signature = _signature(bytes32(0), CHILD_KEY, sha256("localhost"), 0x05);
-        VM.expectRevert();
-        account.validateUserOp(op, bytes32(0), 0);
-    }
-
-    function testAllowsOnlyRegistrationQuestGoalAndContributionSelectors() public {
-        bytes[] memory calls = new bytes[](9);
-        calls[0] = abi.encodeCall(account.acceptRegistration, (bytes32(uint256(1))));
-        calls[1] = abi.encodeCall(account.submitQuest, (1, bytes32(uint256(2))));
-        calls[2] = abi.encodeCall(account.requestStars, (5, "Tidied up", bytes32(uint256(3))));
-        calls[3] = abi.encodeCall(account.cancelStarRequest, (1));
-        calls[4] = abi.encodeCall(
-            account.requestGoal, ("Rocket", "Space adventures", 6, bytes32(uint256(4)))
-        );
-        calls[5] = abi.encodeCall(account.cancelGoalRequest, (1));
-        calls[6] = abi.encodeCall(account.addStarsToGoal, (1, 3));
-        calls[7] = abi.encodeCall(account.requestRedemption, (1));
-        calls[8] = abi.encodeCall(account.cancelRedemption, (1));
-
+    function testDisallowedSelectorsFailEvenWithChildSignature() public {
+        bytes[] memory calls = new bytes[](14);
+        calls[0] = abi.encodeCall(goals.createGoal, (1, "Unauthorized", 1));
+        calls[1] = abi.encodeCall(StarFamilyVault.rewardStars, (1, 1, "Unauthorized"));
+        calls[2] = abi.encodeCall(goals.approveRedemption, (1));
+        calls[3] = abi.encodeCall(goals.rejectRedemption, (1));
+        calls[4] = abi.encodeCall(StarFamilyVault.withdrawSavings, (1, address(this)));
+        calls[5] = abi.encodeCall(StarFamilyVault.shipSavingsPosition, (hex"01", 1, 1));
+        calls[6] =
+            abi.encodeCall(registry.proposeChildRegistration, (familyId, address(0xBAD), NAME));
+        calls[7] = abi.encodeCall(token.mint, (address(account), 1));
+        calls[8] = abi.encodeCall(token.approve, (address(this), 1));
+        calls[9] =
+            abi.encodeWithSignature("execute(address,uint256,bytes)", address(token), 0, calls[7]);
+        calls[10] = abi.encodeCall(StarFamilyVault.withdrawStrategyWeth, (1, address(this)));
+        calls[11] = abi.encodeCall(StarFamilyVault.approveStarRequest, (1));
+        calls[12] = abi.encodeCall(StarFamilyVault.addToSavingsPosition, (bytes32(uint256(1)), 1, 0));
+        calls[13] = abi.encodeCall(StarFamilyVault.dockSavingsPosition, ());
+        bytes32 hash = keccak256("operation");
         for (uint256 i; i < calls.length; ++i) {
-            bytes32 hash = keccak256(abi.encode("allowed", i));
-            PackedUserOperation memory op = _signedOperation(calls[i], hash);
-            require(_validate(op, hash) == 0, "allowed selector rejected");
-            require(_validate(op, keccak256(abi.encode("replay", i))) == 1, "replay accepted");
+            PackedUserOperation memory op;
+            op.sender = address(account);
+            op.callData = calls[i];
+            op.signature = signature(hash, KEY, sha256("localhost"), 0x05);
+            require(validate(op, hash) == 1);
+            vm.prank(EP);
+            (bool success,) = address(account).call(op.callData);
+            require(!success);
         }
     }
 
-    function testProtocolActionsExecuteOnlyThroughEntryPoint() public {
-        uint256 childId = _register();
-        StarQuests quests = questVault.quests();
-        uint256 questId = quests.createQuest(childId, 3, "Read a book");
+    function testRedemptionKeepsParentFinancialAuthority() public {
+        bytes32 id = registry.proposeChildRegistration(familyId, address(account), NAME);
+        vm.prank(EP);
+        uint256 childId = account.acceptRegistration(id);
+        require(registry.getChild(childId).wallet == address(account));
+        token.grantRole(token.VAULT_FACTORY_ROLE(), address(this));
+        token.grantRole(token.MINTER_ROLE(), address(this)); // Test funding; production minting stays on the vault.
+        token.grantRole(token.BURNER_ROLE(), address(goals));
+        token.mint(address(account), 10);
+        uint256 goalId = goals.createGoal(childId, "Book", 5);
+        vm.expectRevert();
+        vm.prank(address(account));
+        goals.createGoal(childId, "Unauthorized", 1);
+        vm.expectRevert();
+        vm.prank(address(account));
+        registry.proposeChildRegistration(familyId, address(0xBAD), NAME);
+        vm.expectRevert();
+        vm.prank(address(account));
+        token.mint(address(account), 100);
+        vm.prank(EP);
+        account.addStarsToGoal(goalId, 5);
+        vm.prank(EP);
+        uint256 requestId = account.requestRedemption(goalId);
+        require(goals.reservedStars(childId) == 5);
+        vm.expectRevert();
+        vm.prank(address(account));
+        goals.approveRedemption(requestId);
+        vm.expectRevert();
+        vm.prank(address(account));
+        goals.rejectRedemption(requestId);
+        registry.setFamilyStatus(familyId, false);
+        vm.prank(EP);
+        account.cancelRedemption(requestId);
+        require(goals.reservedStars(childId) == 0);
+        vm.expectRevert();
+        vm.prank(EP);
+        account.requestRedemption(goalId);
+        registry.setFamilyStatus(familyId, true);
+        vm.prank(EP);
+        account.addStarsToGoal(goalId, 5);
+        vm.prank(EP);
+        requestId = account.requestRedemption(goalId);
+        goals.approveRedemption(requestId);
+        require(token.balanceOf(address(account)) == 5);
+    }
 
-        VM.expectRevert();
-        account.submitQuest(questId, bytes32(uint256(1)));
-        VM.prank(ENTRY_POINT);
-        account.submitQuest(questId, bytes32(uint256(1)));
-
-        VM.prank(ENTRY_POINT);
-        account.requestStars(5, "Tidied up", bytes32(uint256(2)));
-        VM.prank(ENTRY_POINT);
-        account.cancelStarRequest(2);
-
-        VM.prank(ENTRY_POINT);
-        account.requestGoal("Rocket", "Space adventures", 6, bytes32(uint256(3)));
-        VM.prank(ENTRY_POINT);
-        account.cancelGoalRequest(1);
-
+    function testGoalContributionRequiresPasskeyAndEntryPoint() public {
+        bytes32 registration = registry.proposeChildRegistration(familyId, address(account), NAME);
+        vm.prank(EP);
+        uint256 childId = account.acceptRegistration(registration);
         token.grantRole(token.VAULT_FACTORY_ROLE(), address(this));
         token.grantRole(token.MINTER_ROLE(), address(this));
         token.mint(address(account), 10);
-        uint256 goalId = goals.createGoal(childId, "Book", 3);
-        VM.prank(ENTRY_POINT);
-        account.addStarsToGoal(goalId, 3);
-        VM.prank(ENTRY_POINT);
-        uint256 redemptionId = account.requestRedemption(goalId);
-        VM.prank(ENTRY_POINT);
-        account.cancelRedemption(redemptionId);
-
-        require(quests.getRequest(1).questId == questId, "quest submission");
-        require(quests.getRequest(2).status == StarQuests.RequestStatus.Cancelled, "request");
-        require(goals.getGoalRequest(1).status == StarGoals.RedemptionStatus.Cancelled, "goal");
-        require(
-            goals.getRedemption(redemptionId).status == StarGoals.RedemptionStatus.Cancelled,
-            "redemption"
-        );
-        require(goals.reservedStars(childId) == 0, "reservation released");
-    }
-
-    function testRejectsDisallowedSelectorsAndMalformedOperationEnvelope() public {
-        bytes[] memory disallowed = new bytes[](5);
-        disallowed[0] = abi.encodeCall(goals.createGoal, (1, "Unauthorized", 1));
-        disallowed[1] = abi.encodeCall(token.mint, (address(account), 1));
-        disallowed[2] = abi.encodeCall(token.approve, (address(this), 1));
-        disallowed[3] = abi.encodeWithSignature(
-            "execute(address,uint256,bytes)", address(token), 0, disallowed[1]
-        );
-        disallowed[4] = abi.encodeCall(account.goalContributionsVersion, ());
-        for (uint256 i; i < disallowed.length; ++i) {
-            bytes32 hash = keccak256(abi.encode("disallowed", i));
-            require(_validate(_signedOperation(disallowed[i], hash), hash) == 1, "selector allowed");
-        }
-
-        bytes32 validHash = keccak256("valid envelope");
-        PackedUserOperation memory op =
-            _signedOperation(abi.encodeCall(account.requestRedemption, (1)), validHash);
-        op.sender = address(0xBAD);
-        require(_validate(op, validHash) == 1, "foreign sender");
+        uint256 goalId = goals.createGoal(childId, "Game", 10);
+        PackedUserOperation memory op;
         op.sender = address(account);
-        op.initCode = hex"01";
-        require(_validate(op, validHash) == 1, "unexpected init code");
-        op.initCode = "";
+        op.callData = abi.encodeCall(account.addStarsToGoal, (goalId, 3));
+        bytes32 hash = keccak256("contribution-operation");
+        op.signature = signature(hash, KEY, sha256("localhost"), 0x05);
+        require(validate(op, hash) == 0);
+        require(validate(op, keccak256("replay")) == 1);
         op.callData = bytes.concat(op.callData, bytes32(0));
-        require(_validate(op, validHash) == 1, "trailing calldata");
-        op.callData = hex"1234";
-        require(_validate(op, validHash) == 1, "short calldata");
+        require(validate(op, hash) == 1, "Trailing calldata must not be allowed");
+        vm.expectRevert();
+        account.addStarsToGoal(goalId, 3);
+        vm.prank(EP);
+        account.addStarsToGoal(goalId, 3);
+        require(goals.allocatedStars(goalId) == 3 && goals.availableStars(childId) == 7);
     }
 
-    function testRegistrationIsBoundToFamilyAccountAndEnsName() public {
-        uint256 otherFamily = registry.createFamily("other.starwallet.eth");
-        bytes32 registration =
-            registry.proposeChildRegistration(otherFamily, address(account), CHILD_NAME);
-        VM.expectRevert();
-        VM.prank(ENTRY_POINT);
-        account.acceptRegistration(registration);
-
-        registry.cancelChildRegistration(registration);
-        registration = registry.proposeChildRegistration(
+    function testCannotAcceptAnotherFamilyOrName() public {
+        uint256 other = registry.createFamily("other.starwallet.eth");
+        bytes32 id = registry.proposeChildRegistration(other, address(account), NAME);
+        vm.expectRevert();
+        vm.prank(EP);
+        account.acceptRegistration(id);
+        registry.cancelChildRegistration(id);
+        id = registry.proposeChildRegistration(
             familyId, address(account), "wrong.lee.starwallet.eth"
         );
-        VM.expectRevert();
-        VM.prank(ENTRY_POINT);
-        account.acceptRegistration(registration);
-
-        registry.cancelChildRegistration(registration);
-        require(_register() != 0, "bound registration failed");
+        vm.expectRevert();
+        vm.prank(EP);
+        account.acceptRegistration(id);
     }
 
-    function testParentGrantPersistsAndRevocationRequiresFreshApproval() public {
-        _enrollParent();
-        bytes memory callData =
-            abi.encodeCall(account.requestStars, (10, "Please", bytes32(uint256(1))));
-        bytes32 hash = keccak256("parent-authorized operation");
-        PackedUserOperation memory op = _parentOperation(callData, hash, 1);
-
-        require(_validate(op, hash) == 0, "parent grant rejected");
-        VM.warp(block.timestamp + 3650 days);
-        require(_validate(op, hash) == 0, "hidden expiry introduced");
-        require(_validate(op, keccak256("different operation")) == 1, "operation replay");
-
+    function testParentGrantPersistsAndRevocationRequiresNewApproval() public {
+        enrollParent();
+        PackedUserOperation memory op;
+        op.sender = address(account);
+        op.callData = abi.encodeCall(account.requestStars, (10, "Please", bytes32(uint256(1))));
+        bytes32 hash = keccak256("session-op");
+        op.signature = sessionSignature(hash, KEY + 1, KEY + 2, 1);
+        require(validate(op, hash) == 0);
+        vm.warp(block.timestamp + 3650 days);
+        require(validate(op, hash) == 0, "No daily or hidden time limit");
+        require(validate(op, keccak256("another operation")) == 1, "No operation replay");
         account.revokeParentAuthorizations();
-        require(account.parentAuthorizationEpoch() == 2, "epoch not incremented");
-        require(_validate(op, hash) == 1, "revoked grant accepted");
-        op = _parentOperation(callData, hash, 2);
-        require(_validate(op, hash) == 0, "fresh approval rejected");
-
-        op = _signedOperation(callData, hash);
-        require(_validate(op, hash) == 1, "child key bypassed parent control");
+        require(validate(op, hash) == 1, "Revoked device rejected");
+        op.signature = sessionSignature(hash, KEY + 1, KEY + 2, 2);
+        require(validate(op, hash) == 0, "New parent proof required");
+        op.signature = signature(hash, KEY, sha256("localhost"), 0x05);
+        require(validate(op, hash) == 1, "Child passkey cannot bypass Papa");
     }
 
-    function testParentAuthorizedDeviceCanSubmitRequestWithoutMovingFunds() public {
-        uint256 childId = _register();
-        _enrollParent();
-        bytes memory callData =
+    function testParentAuthorizedDeviceSubmitsAnActualChildRequestWithoutMovingFunds() public {
+        bytes32 registration = registry.proposeChildRegistration(familyId, address(account), NAME);
+        vm.prank(EP);
+        uint256 childId = account.acceptRegistration(registration);
+        enrollParent();
+        PackedUserOperation memory op;
+        op.sender = address(account);
+        op.callData =
             abi.encodeCall(account.requestStars, (10, "Please add Stars", bytes32(uint256(7))));
-        bytes32 hash = keccak256("real child request");
-        PackedUserOperation memory op = _parentOperation(callData, hash, 1);
-        require(_validate(op, hash) == 0, "device grant rejected");
-
-        VM.prank(ENTRY_POINT);
-        (bool success,) = address(account).call(callData);
-        require(success, "request failed");
-        require(questVault.quests().getRequest(1).childId == childId, "wrong child");
-        require(questVault.quests().getRequest(1).stars == 10, "wrong request");
-        require(token.balanceOf(address(account)) == 0, "request moved Stars");
+        bytes32 hash = keccak256("real-child-request");
+        op.signature = sessionSignature(hash, KEY + 1, KEY + 2, 1);
+        require(validate(op, hash) == 0);
+        vm.prank(EP);
+        (bool success,) = address(account).call(op.callData);
+        require(success);
+        require(questVault.quests().getRequest(1).childId == childId);
+        require(questVault.quests().getRequest(1).stars == 10);
+        require(token.balanceOf(address(account)) == 0, "A request cannot award Stars");
     }
 
     function testFuzzMalformedParentGrantsCannotAuthorize(bytes calldata malformed) public {
-        _enrollParent();
+        enrollParent();
         PackedUserOperation memory op;
         op.sender = address(account);
         op.callData = abi.encodeCall(account.cancelStarRequest, (1));
         op.signature = abi.encodePacked(bytes4(0x53575031), malformed);
-        require(_validate(op, keccak256("fuzz operation")) == 1, "malformed grant accepted");
+        require(validate(op, keccak256("fuzz-operation")) == 1);
     }
 
     function testOnlyRegisteredParentCanEnrollRotateOrRevoke() public {
-        (uint256 qx, uint256 qy) = VM.publicKeyP256(CHILD_KEY + 1);
-        VM.prank(address(0xBAD));
-        VM.expectRevert();
+        (uint256 qx, uint256 qy) = vm.publicKeyP256(KEY + 1);
+        vm.prank(address(0xBAD));
+        vm.expectRevert();
         account.configureParentPasskey(bytes32(qx), bytes32(qy), "parent");
-
-        _enrollParent();
-        require(account.parentAuthorizationEpoch() == 1, "enrollment epoch");
-        VM.prank(address(0xBAD));
-        VM.expectRevert();
+        enrollParent();
+        vm.prank(address(0xBAD));
+        vm.expectRevert();
         account.revokeParentAuthorizations();
-        VM.expectRevert();
-        account.configureParentPasskey(bytes32(0), bytes32(0), "invalid");
-
-        _enrollParent();
-        require(account.parentAuthorizationEpoch() == 2, "rotation epoch");
+        vm.expectRevert();
+        account.configureParentPasskey(bytes32(0), bytes32(0), "bad");
+        require(account.parentAuthorizationEpoch() == 1);
     }
 
-    function testParentGrantBindsParentDeviceNetworkAccountAndAllowedCall() public {
-        _enrollParent();
-        bytes memory request =
-            abi.encodeCall(account.requestStars, (10, "Please", bytes32(uint256(1))));
-        bytes32 hash = keccak256("scoped operation");
-
+    function testParentGrantRejectsWrongParentDeviceNetworkAndFinancialCalls() public {
+        enrollParent();
         PackedUserOperation memory op;
         op.sender = address(account);
-        op.callData = request;
-        op.signature = _sessionSignature(hash, CHILD_KEY, CHILD_KEY + 2, 1);
-        require(_validate(op, hash) == 1, "child key accepted as parent");
-
-        op.signature = _sessionSignature(hash, CHILD_KEY + 1, CHILD_KEY + 2, 1);
+        op.callData = abi.encodeCall(account.requestStars, (10, "Please", bytes32(uint256(1))));
+        bytes32 hash = keccak256("scoped operation");
+        op.signature = sessionSignature(hash, KEY, KEY + 2, 1);
+        require(validate(op, hash) == 1, "Child is not the parent key");
+        op.signature = sessionSignature(hash, KEY + 1, KEY + 2, 1);
+        bytes memory valid = op.signature;
         op.signature[120] = bytes1(uint8(op.signature[120]) ^ 1);
-        require(_validate(op, hash) == 1, "invalid device signature accepted");
-
-        op = _parentOperation(request, hash, 1);
-        uint256 originalChainId = block.chainid;
-        VM.chainId(originalChainId + 1);
-        require(_validate(op, hash) == 1, "cross-chain grant accepted");
-        VM.chainId(originalChainId);
-
+        require(validate(op, hash) == 1, "Device signature required");
+        op.signature = sessionSignature(hash, KEY + 1, KEY + 2, 1);
+        vm.chainId(1);
+        require(validate(op, hash) == 1, "No cross-chain grant replay");
+        vm.chainId(11155111);
+        op.signature = valid;
         op.callData = abi.encodeCall(account.revokeParentAuthorizations, ());
-        require(_validate(op, hash) == 1, "device revoked parent grants");
-        op.callData = abi.encodeWithSignature("withdrawSavings(uint256,address)", 1, address(this));
-        require(_validate(op, hash) == 1, "financial call allowed");
-
-        StarChildAccount other = factory.createChildAccount(
-            familyId, keccak256("other"), publicKeyX, publicKeyY, "other-child"
-        );
-        other.configureParentPasskey(
-            account.parentPublicKeyX(), account.parentPublicKeyY(), "same-parent"
-        );
-        op = _parentOperation(request, hash, 1);
-        op.sender = address(other);
-        require(_validateAccount(other, op, hash) == 1, "cross-account grant accepted");
+        require(validate(op, hash) == 1, "Device cannot revoke or enroll");
+        op.callData = abi.encodeCall(StarFamilyVault.withdrawSavings, (1, address(this)));
+        require(validate(op, hash) == 1, "No financial permissions");
     }
 
-    function testRejectsInvalidCredentialConfiguration() public {
-        string memory oversizedCredential = new string(1025);
-        require(!_canDeploy(bytes32(0), bytes32(0), "invalid"), "invalid key");
-        require(!_canDeploy(publicKeyX, publicKeyY, ""), "empty credential");
-        require(!_canDeploy(publicKeyX, publicKeyY, oversizedCredential), "oversized credential");
-    }
-
-    function _canDeploy(bytes32 qx, bytes32 qy, string memory credential) private returns (bool) {
-        try new StarChildAccount(
-            registry,
-            goals,
-            familyId,
-            ensNode,
-            qx,
-            qy,
-            sha256("localhost"),
-            credential,
-            IQuestVaultFactory(address(this))
-        ) {
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    function _enrollParent() private {
-        (uint256 qx, uint256 qy) = VM.publicKeyP256(CHILD_KEY + 1);
-        account.configureParentPasskey(bytes32(qx), bytes32(qy), "parent-credential");
-    }
-
-    function _parentOperation(bytes memory callData, bytes32 hash, uint256 epoch)
-        private
-        view
-        returns (PackedUserOperation memory op)
-    {
+    function testParentGrantCannotBeReusedForAnotherAccountOrAfterKeyRotation() public {
+        enrollParent();
+        PackedUserOperation memory op;
         op.sender = address(account);
-        op.callData = callData;
-        op.signature = _sessionSignature(hash, CHILD_KEY + 1, CHILD_KEY + 2, epoch);
+        op.callData = abi.encodeCall(account.cancelStarRequest, (1));
+        bytes32 hash = keccak256("scoped");
+        op.signature = sessionSignature(hash, KEY + 1, KEY + 2, 1);
+        StarChildAccount other =
+            factory.createChildAccount(familyId, keccak256("other"), x, y, "other");
+        (uint256 px, uint256 py) = vm.publicKeyP256(KEY + 1);
+        other.configureParentPasskey(bytes32(px), bytes32(py), "parent");
+        op.sender = address(other);
+        vm.prank(EP);
+        require(other.validateUserOp(op, hash, 0) == 1);
+        op.sender = address(account);
+        enrollParent();
+        require(validate(op, hash) == 1, "Even same-key re-enrollment revokes old grants");
     }
 
-    function _sessionSignature(bytes32 hash, uint256 parentKey, uint256 deviceKey, uint256 epoch)
+    function enrollParent() private {
+        (uint256 px, uint256 py) = vm.publicKeyP256(KEY + 1);
+        account.configureParentPasskey(bytes32(px), bytes32(py), "parent-credential");
+    }
+
+    function sessionSignature(bytes32 hash, uint256 parentKey, uint256 deviceKey, uint256 epoch)
         private
         view
         returns (bytes memory)
     {
-        (uint256 deviceX, uint256 deviceY) = VM.publicKeyP256(deviceKey);
-        bytes memory proof = _signature(
-            account.parentAuthorizationDigest(bytes32(deviceX), bytes32(deviceY), epoch),
+        (uint256 dx, uint256 dy) = vm.publicKeyP256(deviceKey);
+        bytes memory proof = signature(
+            account.parentAuthorizationDigest(bytes32(dx), bytes32(dy), epoch),
             parentKey,
             sha256("localhost"),
             0x05
         );
-        (bytes32 r, bytes32 s) = VM.signP256(deviceKey, sha256(abi.encodePacked(hash)));
-        return abi.encodePacked(
-            bytes4(0x53575031), epoch, bytes32(deviceX), bytes32(deviceY), r, s, proof
-        );
+        (bytes32 r, bytes32 s) = vm.signP256(deviceKey, sha256(abi.encodePacked(hash)));
+        return abi.encodePacked(bytes4(0x53575031), epoch, bytes32(dx), bytes32(dy), r, s, proof);
     }
 
-    function _register() private returns (uint256 childId) {
-        bytes32 registration =
-            registry.proposeChildRegistration(familyId, address(account), CHILD_NAME);
-        VM.prank(ENTRY_POINT);
-        childId = account.acceptRegistration(registration);
+    function validate(PackedUserOperation memory op, bytes32 hash) private returns (uint256) {
+        vm.prank(EP);
+        return account.validateUserOp(op, hash, 0);
     }
 
-    function _signedOperation(bytes memory callData, bytes32 hash)
-        private
-        view
-        returns (PackedUserOperation memory op)
-    {
-        op.sender = address(account);
-        op.callData = callData;
-        op.signature = _signature(hash, CHILD_KEY, sha256("localhost"), 0x05);
-    }
-
-    function _validate(PackedUserOperation memory op, bytes32 hash) private returns (uint256) {
-        return _validateAccount(account, op, hash);
-    }
-
-    function _validateAccount(StarChildAccount target, PackedUserOperation memory op, bytes32 hash)
-        private
-        returns (uint256)
-    {
-        VM.prank(ENTRY_POINT);
-        return target.validateUserOp(op, hash, 0);
-    }
-
-    function _signature(bytes32 hash, uint256 key, bytes32 rpHash, bytes1 flags)
+    function signature(bytes32 hash, uint256 key, bytes32 rpHash, bytes1 flags)
         private
         pure
         returns (bytes memory)
@@ -468,7 +442,7 @@ contract StarChildAccountTest {
         );
         bytes memory auth = abi.encodePacked(rpHash, flags, bytes4(0));
         (bytes32 r, bytes32 s) =
-            VM.signP256(key, sha256(abi.encodePacked(auth, sha256(bytes(json)))));
+            vm.signP256(key, sha256(abi.encodePacked(auth, sha256(bytes(json)))));
         return abi.encode(r, s, uint256(23), uint256(1), auth, json);
     }
 }

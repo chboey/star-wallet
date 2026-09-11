@@ -73,7 +73,11 @@ export function handleStarRequestResolved(event: StarRequestResolved): void {
     "Invalid request status",
   );
   item!.status = statuses[event.params.status];
-  if (event.params.status == 1) item!.rewardId = event.params.rewardId;
+  if (event.params.status == 1)
+    item!.reward =
+      dataSource.context().getString("vault") +
+      "-" +
+      event.params.rewardId.toString();
   item!.updatedAt = event.block.timestamp;
   item!.resolutionTransactionHash = event.transaction.hash;
   item!.save();

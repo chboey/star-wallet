@@ -16,7 +16,13 @@ import {
   PendingChildRegistration,
   StarBalance,
 } from "../generated/schema";
-import { eventId, requireChild, requireFamily } from "./helpers";
+import {
+  activity,
+  eventId,
+  loadSavings,
+  requireChild,
+  requireFamily,
+} from "./helpers";
 
 export function handleFamilyCreated(event: FamilyCreated): void {
   const familyId = event.params.familyId.toString();
@@ -28,7 +34,12 @@ export function handleFamilyCreated(event: FamilyCreated): void {
   family.childCount = 0;
   family.createdAt = event.block.timestamp;
   family.updatedAt = event.block.timestamp;
+  const savings = loadSavings(familyId, event);
+  savings.save();
+  family.savings = familyId;
   family.save();
+  const item = activity(event, "FAMILY_CREATED", familyId);
+  item.save();
 }
 
 export function handleChildRegistered(event: ChildRegistered): void {
@@ -50,6 +61,7 @@ export function handleChildRegistered(event: ChildRegistered): void {
     tokenBalance === null ? BigInt.zero() : tokenBalance.totalIssued;
   child.totalStarsBurned =
     tokenBalance === null ? BigInt.zero() : tokenBalance.totalBurned;
+  child.totalPrincipalContributed = BigInt.zero();
   child.createdAt = event.block.timestamp;
   child.updatedAt = event.block.timestamp;
   child.save();
@@ -61,6 +73,10 @@ export function handleChildRegistered(event: ChildRegistered): void {
   family.childCount += 1;
   family.updatedAt = event.block.timestamp;
   family.save();
+
+  const item = activity(event, "CHILD_REGISTERED", familyId);
+  item.child = childId;
+  item.save();
 }
 
 export function handleChildRegistrationProposed(
@@ -68,6 +84,7 @@ export function handleChildRegistrationProposed(
 ): void {
   const familyId = event.params.familyId.toString();
   requireFamily(familyId);
+
   assert(
     PendingChildRegistration.load(event.params.registrationId) === null,
     "A registration ID can only have one pending attempt",
@@ -87,6 +104,10 @@ export function handleChildRegistrationProposed(
   const pending = new PendingChildRegistration(event.params.registrationId);
   pending.registration = registration.id;
   pending.save();
+
+  const item = activity(event, "CHILD_REGISTRATION_PROPOSED", familyId);
+  item.registration = registration.id;
+  item.save();
 }
 
 export function handleChildRegistrationCancelled(
@@ -118,6 +139,14 @@ export function handleChildRegistrationCancelled(
     "PendingChildRegistration",
     event.params.registrationId.toHexString(),
   );
+
+  const item = activity(
+    event,
+    "CHILD_REGISTRATION_CANCELLED",
+    registration!.family,
+  );
+  item.registration = registration!.id;
+  item.save();
 }
 
 export function handleChildRegistrationAccepted(
@@ -154,6 +183,15 @@ export function handleChildRegistrationAccepted(
     "PendingChildRegistration",
     event.params.registrationId.toHexString(),
   );
+
+  const item = activity(
+    event,
+    "CHILD_REGISTRATION_ACCEPTED",
+    registration!.family,
+  );
+  item.child = childId;
+  item.registration = registration!.id;
+  item.save();
 }
 
 export function handleFamilyStatusUpdated(event: FamilyStatusUpdated): void {
@@ -166,20 +204,30 @@ export function handleFamilyStatusUpdated(event: FamilyStatusUpdated): void {
   family.active = event.params.active;
   family.updatedAt = event.block.timestamp;
   family.save();
+
+  const item = activity(event, "FAMILY_STATUS_UPDATED", familyId);
+  item.active = event.params.active;
+  item.save();
 }
 
 export function handleChildStatusUpdated(event: ChildStatusUpdated): void {
   const childId = event.params.childId.toString();
-  const child = requireChild(childId);
+  const child = Child.load(childId);
+  assert(child !== null, "Updated child must exist");
   assert(
-    child.family == event.params.familyId.toString(),
+    child!.family == event.params.familyId.toString(),
     "Child status family must match",
   );
-  child.active = event.params.active;
-  child.updatedAt = event.block.timestamp;
-  child.save();
+  child!.active = event.params.active;
+  child!.updatedAt = event.block.timestamp;
+  child!.save();
 
-  const family = requireFamily(child.family);
+  const family = requireFamily(child!.family);
   family.updatedAt = event.block.timestamp;
   family.save();
+
+  const item = activity(event, "CHILD_STATUS_UPDATED", child!.family);
+  item.child = childId;
+  item.active = event.params.active;
+  item.save();
 }

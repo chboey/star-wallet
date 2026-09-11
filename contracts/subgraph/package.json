@@ -3,16 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "configure:sepolia": "node --env-file-if-exists=.env scripts/configure.mjs",
     "codegen": "graph codegen",
     "build": "graph build --network sepolia",
+    "validate:queries": "node scripts/validate-queries.mjs",
+    "test:queries": "node --test tests/*.test.mjs",
     "test:mappings": "graph test --version 0.6.0 --recompile",
-    "check": "npm run codegen && npm run build && npm run test:mappings"
+    "test": "npm run test:queries && npm run test:mappings",
+    "check": "npm run codegen && npm run build && npm run validate:queries && npm test",
+    "auth:studio": "node --env-file-if-exists=.env scripts/studio.mjs auth",
+    "deploy:studio": "node --env-file-if-exists=.env scripts/studio.mjs deploy"
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "0.38.2"
   },
   "devDependencies": {
     "@graphprotocol/graph-cli": "^0.98.1",
-    "matchstick-as": "0.6.0"
+    "graphql": "^16.11.0",
+    "matchstick-as": "0.6.0",
+    "pluralize": "8.0.0"
   }
 }

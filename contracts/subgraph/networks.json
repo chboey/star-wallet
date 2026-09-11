@@ -15,6 +15,14 @@
     "StarFamilyVaultFactory": {
       "address": "0x9849e859c38f4c28a900ec066472ce78e2b29567",
       "startBlock": 11675798
+    },
+    "Aqua": {
+      "address": "0x38C8c7073cEc4153fA090f819528E69a857f3D90",
+      "startBlock": 11675793
+    },
+    "AquaSwapVM": {
+      "address": "0x2b893B0B15D71E735BB975daF8ffe26CEC449629",
+      "startBlock": 11675794
     }
   }
 }

@@ -10,6 +10,8 @@ import { IAqua } from "./interfaces/IAqua.sol";
 import { IChainlinkAggregatorV3 } from "./interfaces/IChainlinkAggregatorV3.sol";
 import { IStarRegistry } from "./interfaces/IStarRegistry.sol";
 import { IStarToken } from "./interfaces/IStarToken.sol";
+import { StarQuests } from "./StarQuests.sol";
+import { StarQuestsFactory } from "./StarQuestsFactory.sol";
 
 contract StarFamilyVault is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -80,6 +82,7 @@ contract StarFamilyVault is ReentrancyGuard {
     }
 
     uint256 public immutable familyId;
+    StarQuests public immutable quests;
     IERC20 public immutable usdc;
     IERC20 public immutable weth;
     IStarRegistry public immutable registry;
@@ -202,7 +205,8 @@ contract StarFamilyVault is ReentrancyGuard {
         address aquaAddress,
         address swapVmAddress,
         address emergencyAdminAddress,
-        AquaSafetyConfig memory safety
+        AquaSafetyConfig memory safety,
+        StarQuestsFactory questsFactory
     ) {
         if (familyId_ == 0) revert InvalidFamilyId();
         if (
@@ -242,6 +246,7 @@ contract StarFamilyVault is ReentrancyGuard {
         weth = IERC20(wethAddress);
         registry = IStarRegistry(registryAddress);
         star = IStarToken(starAddress);
+        quests = questsFactory.create(IStarRegistry(registryAddress), familyId);
         aqua = IAqua(aquaAddress);
         swapVmApp = swapVmAddress;
         emergencyAdmin = emergencyAdminAddress;
@@ -267,6 +272,19 @@ contract StarFamilyVault is ReentrancyGuard {
         returns (uint256 rewardId)
     {
         _requireActiveParent(msg.sender);
+        return _rewardStars(childId, amount, reason);
+    }
+
+    function approveStarRequest(uint256 requestId) external nonReentrant returns (uint256) {
+        _requireActiveParent(msg.sender);
+        (uint256 childId, uint256 amount) = quests.consumeRequest(requestId, nextRewardId);
+        return _rewardStars(childId, amount, "Approved Star request");
+    }
+
+    function _rewardStars(uint256 childId, uint256 amount, string memory reason)
+        private
+        returns (uint256 rewardId)
+    {
         IStarRegistry.Child memory child = registry.getChild(childId);
         if (child.familyId != familyId) {
             revert ChildNotInFamily(childId, familyId, child.familyId);
@@ -356,9 +374,7 @@ contract StarFamilyVault is ReentrancyGuard {
     /// @notice Allocate idle vault funds to the same Aqua strategy. No new Stars or principal.
     /// @dev A single token may be added. The immutable price range and deadline do not change.
     function addToSavingsPosition(
-        bytes32 expectedStrategyHash,
-        uint256 usdcAmount,
-        uint256 wethAmount
+        bytes32 expectedStrategyHash, uint256 usdcAmount, uint256 wethAmount
     ) external nonReentrant {
         _requireActiveParent(msg.sender);
         _requireAquaActive();
@@ -550,6 +566,23 @@ contract StarFamilyVault is ReentrancyGuard {
         emit SavingsPositionUpdated(familyId, strategyHash, currentUsdc, currentWeth, false);
     }
 
+    function _requireParent(address account) private view {
+        IStarRegistry.Family memory family = registry.getFamily(familyId);
+        if (family.parent != account) {
+            revert NotFamilyParent(familyId, account);
+        }
+    }
+
+    function _requireActiveParent(address account) private view {
+        _requireParent(account);
+        IStarRegistry.Family memory family = registry.getFamily(familyId);
+        if (!family.active) revert FamilyInactive(familyId);
+    }
+
+    function _requireAquaActive() private view {
+        if (aquaPaused) revert AquaOperationsPaused();
+    }
+
     function _validateStrategy(bytes calldata strategy)
         private
         view
@@ -707,21 +740,6 @@ contract StarFamilyVault is ReentrancyGuard {
         assembly ("memory-safe") {
             value := shr(216, mload(add(add(data, 0x20), offset)))
         }
-    }
-
-    function _requireParent(address account) private view {
-        IStarRegistry.Family memory family = registry.getFamily(familyId);
-        if (family.parent != account) revert NotFamilyParent(familyId, account);
-    }
-
-    function _requireActiveParent(address account) private view {
-        _requireParent(account);
-        IStarRegistry.Family memory family = registry.getFamily(familyId);
-        if (!family.active) revert FamilyInactive(familyId);
-    }
-
-    function _requireAquaActive() private view {
-        if (aquaPaused) revert AquaOperationsPaused();
     }
 
     function _positionTokens() private view returns (address[] memory tokens) {

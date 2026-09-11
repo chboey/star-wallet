@@ -14,7 +14,7 @@ import {
   RedemptionRequested,
 } from "../generated/StarGoals/StarGoals";
 import { Goal, GoalRequest, Redemption } from "../generated/schema";
-import { requireChild } from "./helpers";
+import { activity, requireChild } from "./helpers";
 
 export function handleGoalRequested(event: GoalRequested): void {
   const id = event.params.requestId.toString();
@@ -98,6 +98,11 @@ export function handleGoalCreated(event: GoalCreated): void {
   goal.updatedAt = event.block.timestamp;
   goal.save();
 
+  const item = activity(event, "GOAL_CREATED", child.family);
+  item.child = childId;
+  item.goal = goalId;
+  item.amount = event.params.starCost;
+  item.save();
 }
 
 export function handleGoalStarsAdded(event: GoalStarsAdded): void {
@@ -131,6 +136,11 @@ export function handleGoalStarsAdded(event: GoalStarsAdded): void {
   goal!.allocatedStars = event.params.totalAllocated;
   goal!.updatedAt = event.block.timestamp;
   goal!.save();
+  const item = activity(event, "GOAL_STARS_ADDED", child.family);
+  item.child = child.id;
+  item.goal = goal!.id;
+  item.amount = event.params.amount;
+  item.save();
 }
 
 export function handleGoalCancelled(event: GoalCancelled): void {
@@ -156,6 +166,10 @@ export function handleGoalCancelled(event: GoalCancelled): void {
   goal!.updatedAt = event.block.timestamp;
   goal!.save();
 
+  const item = activity(event, "GOAL_CANCELLED", goal!.family);
+  item.child = goal!.child;
+  item.goal = goalId;
+  item.save();
 }
 
 export function handleGoalCompleted(event: GoalCompleted): void {
@@ -172,6 +186,10 @@ export function handleGoalCompleted(event: GoalCompleted): void {
   goal!.updatedAt = event.block.timestamp;
   goal!.save();
 
+  const item = activity(event, "GOAL_COMPLETED", goal!.family);
+  item.child = goal!.child;
+  item.goal = goalId;
+  item.save();
 }
 
 export function handleRedemptionRequested(event: RedemptionRequested): void {
@@ -207,6 +225,12 @@ export function handleRedemptionRequested(event: RedemptionRequested): void {
   child.updatedAt = event.block.timestamp;
   child.save();
 
+  const item = activity(event, "REDEMPTION_REQUESTED", child.family);
+  item.child = childId;
+  item.goal = goalId;
+  item.redemption = redemptionId;
+  item.amount = event.params.reservedStars;
+  item.save();
 }
 
 export function handleRedemptionApproved(event: RedemptionApproved): void {
@@ -273,4 +297,10 @@ function resolveRedemption(
   goal!.updatedAt = event.block.timestamp;
   goal!.save();
 
+  const item = activity(event, "REDEMPTION_" + status, redemption!.family);
+  item.child = redemption!.child;
+  item.goal = redemption!.goal;
+  item.redemption = redemptionId;
+  item.amount = redemption!.reservedStars;
+  item.save();
 }
