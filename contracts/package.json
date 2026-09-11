@@ -3,10 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./child-validation-probe": {
+      "types": "./abi/child-validation-probe.d.ts",
+      "default": "./abi/child-validation-probe.js"
+    },
+    "./child-account": {
+      "types": "./child-account.d.ts",
+      "default": "./child-account.js"
+    },
+    "./abi": {
+      "types": "./abi/index.d.ts",
+      "default": "./abi/index.js"
+    }
+  },
   "scripts": {
-    "build": "forge build --force",
+    "build": "node scripts/compile.mjs && forge build --force",
     "fmt:check": "forge fmt --check",
-    "test": "forge test"
+    "test": "forge test",
+    "test:scripts": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@1inch/solidity-utils": "6.9.10",
