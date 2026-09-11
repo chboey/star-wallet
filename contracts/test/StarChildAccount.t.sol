@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { StarChildAccount, IQuestVaultFactory } from "../src/StarChildAccount.sol";
+import { StarChildAccountFactory } from "../src/StarChildAccountFactory.sol";
 import { StarRegistry } from "../src/StarRegistry.sol";
 import { StarToken } from "../src/StarToken.sol";
 import { StarGoals } from "../src/StarGoals.sol";
@@ -37,6 +38,7 @@ contract StarChildAccountTest {
     StarRegistry private registry;
     StarToken private token;
     StarGoals private goals;
+    StarChildAccountFactory private factory;
     QuestVaultHarness private questVault;
     uint256 private familyId;
     bytes32 private ensNode;
@@ -47,6 +49,9 @@ contract StarChildAccountTest {
         registry = new StarRegistry();
         token = new StarToken(address(this));
         goals = new StarGoals(address(registry), address(token));
+        factory = new StarChildAccountFactory(
+            registry, goals, "localhost", IQuestVaultFactory(address(this))
+        );
         familyId = registry.createFamily("lee.starwallet.eth");
         ensNode = keccak256(abi.encodePacked(bytes32(0), keccak256("eth")));
         ensNode = keccak256(abi.encodePacked(ensNode, keccak256("starwallet")));
@@ -56,16 +61,8 @@ contract StarChildAccountTest {
         (uint256 qx, uint256 qy) = VM.publicKeyP256(CHILD_KEY);
         publicKeyX = bytes32(qx);
         publicKeyY = bytes32(qy);
-        account = new StarChildAccount(
-            registry,
-            goals,
-            familyId,
-            ensNode,
-            publicKeyX,
-            publicKeyY,
-            sha256("localhost"),
-            "child-credential",
-            IQuestVaultFactory(address(this))
+        account = factory.createChildAccount(
+            familyId, ensNode, publicKeyX, publicKeyY, "child-credential"
         );
     }
 
@@ -86,6 +83,47 @@ contract StarChildAccountTest {
         bytes32 hash = keccak256("bound child operation");
         op.signature = _signature(hash, CHILD_KEY, sha256("localhost"), 0x05);
         require(_validate(op, hash) == 0, "valid passkey rejected");
+    }
+
+    function testDeterministicCredentialBindingAndIdempotentRetry() public {
+        require(
+            address(account)
+                == factory.predictChildAccount(
+                    familyId, ensNode, publicKeyX, publicKeyY, "child-credential"
+                ),
+            "prediction"
+        );
+        require(
+            address(account)
+                == address(
+                    factory.createChildAccount(
+                        familyId, ensNode, publicKeyX, publicKeyY, "child-credential"
+                    )
+                ),
+            "idempotent retry"
+        );
+        require(factory.accountByName(familyId, ensNode) == address(account), "name binding");
+        VM.expectRevert();
+        factory.createChildAccount(
+            familyId, ensNode, publicKeyX, publicKeyY, "replacement-credential"
+        );
+    }
+
+    function testOnlyActiveFamilyParentCanDeployChildAccount() public {
+        VM.expectRevert();
+        VM.prank(address(0xBAD));
+        factory.createChildAccount(
+            familyId, keccak256("other"), publicKeyX, publicKeyY, "other-credential"
+        );
+
+        registry.setFamilyStatus(familyId, false);
+        VM.expectRevert();
+        factory.createChildAccount(
+            familyId, keccak256("other"), publicKeyX, publicKeyY, "other-credential"
+        );
+
+        VM.expectRevert();
+        factory.createChildAccount(familyId, bytes32(0), publicKeyX, publicKeyY, "invalid-name");
     }
 
     function testRejectsWrongKeyReplayRpAndMissingUserVerification() public {
@@ -320,16 +358,8 @@ contract StarChildAccountTest {
         op.callData = abi.encodeWithSignature("withdrawSavings(uint256,address)", 1, address(this));
         require(_validate(op, hash) == 1, "financial call allowed");
 
-        StarChildAccount other = new StarChildAccount(
-            registry,
-            goals,
-            familyId,
-            keccak256("other"),
-            publicKeyX,
-            publicKeyY,
-            sha256("localhost"),
-            "other-child",
-            IQuestVaultFactory(address(this))
+        StarChildAccount other = factory.createChildAccount(
+            familyId, keccak256("other"), publicKeyX, publicKeyY, "other-child"
         );
         other.configureParentPasskey(
             account.parentPublicKeyX(), account.parentPublicKeyY(), "same-parent"
