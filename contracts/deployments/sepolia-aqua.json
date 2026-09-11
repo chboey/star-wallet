@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 5,
+  "network": "sepolia",
+  "chainId": 11155111,
+  "compilerVersion": "0.8.30+commit.73712a01.Emscripten.clang",
+  "optimizer": {
+    "enabled": true,
+    "runs": 500
+  },
+  "evmVersion": "cancun",
+  "contracts": {
+    "Aqua": {
+      "address": "0x38c8c7073cec4153fa090f819528e69a857f3d90",
+      "sourceName": "@1inch/aqua/src/Aqua.sol",
+      "constructorArguments": [],
+      "blockNumber": "11675793",
+      "transactionHash": "0x0030036af94698230eb91f087f79d2c67a4cbe0f47e9febc12a3a0b625645355",
+      "runtimeCodeHash": "0x371f2cf0cf5ad231b80107ae85decb18555f997b613030fc55cd458110e502cf"
+    },
+    "AquaSwapVMRouter": {
+      "address": "0x2b893b0b15d71e735bb975daf8ffe26cec449629",
+      "sourceName": "vendor/1inch-swap-vm/src/routers/AquaSwapVMRouter.sol",
+      "constructorArguments": [
+        "0x38c8c7073cec4153fa090f819528e69a857f3d90",
+        "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+        "0x166030C9c3dC2609055d129be1eeE3E18bAEFe00",
+        "SwapVM",
+        "1"
+      ],
+      "blockNumber": "11675794",
+      "transactionHash": "0xd418c55bfdbea97b02c87ff67e17daf19e46b6e56b67e7c052b4488d29a3ae2a",
+      "runtimeCodeHash": "0xd62800eebe19bf048af1d70bbf00aead9d4b030fa1d2aff46c5bbe68e0248061"
+    }
+  },
+  "configuration": {
+    "CHAIN_ID": "11155111",
+    "USDC_ADDRESS": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    "WETH_ADDRESS": "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+    "AQUA_ADDRESS": "0x38c8c7073cec4153fa090f819528e69a857f3d90",
+    "AQUA_START_BLOCK": "11675793",
+    "AQUA_RUNTIME_CODE_HASH": "0x371f2cf0cf5ad231b80107ae85decb18555f997b613030fc55cd458110e502cf",
+    "AQUA_SWAP_VM_ADDRESS": "0x2b893b0b15d71e735bb975daf8ffe26cec449629",
+    "AQUA_SWAP_VM_START_BLOCK": "11675794",
+    "AQUA_SWAP_VM_RUNTIME_CODE_HASH": "0xd62800eebe19bf048af1d70bbf00aead9d4b030fa1d2aff46c5bbe68e0248061"
+  }
+}

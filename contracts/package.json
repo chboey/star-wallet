@@ -21,7 +21,9 @@
     "build": "node scripts/compile.mjs && forge build --force",
     "fmt:check": "forge fmt --check",
     "test": "forge test",
-    "test:scripts": "node --test test/*.test.mjs"
+    "test:scripts": "node --test test/*.test.mjs",
+    "preflight:aqua:sepolia": "DRY_RUN=true node --env-file-if-exists=.env scripts/deploy-aqua.mjs",
+    "deploy:aqua:sepolia": "node --env-file-if-exists=.env scripts/deploy-aqua.mjs"
   },
   "devDependencies": {
     "@1inch/solidity-utils": "6.9.10",
