@@ -1,0 +1,84 @@
+enum ChildRegistrationStatus {
+  PENDING
+  ACCEPTED
+  CANCELLED
+}
+
+type Family @entity(immutable: false) {
+  id: ID!
+  parent: Bytes!
+  ensNode: Bytes!
+  ensName: String!
+  active: Boolean!
+  vault: FamilyVault
+  childCount: Int!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  children: [Child!]! @derivedFrom(field: "family")
+  childRegistrations: [ChildRegistration!]! @derivedFrom(field: "family")
+}
+
+type FamilyVault @entity(immutable: false) {
+  id: Bytes!
+  family: Family!
+  parent: Bytes!
+  emergencyAdmin: Bytes!
+  aqua: Bytes!
+  swapVm: Bytes!
+  usdc: Bytes!
+  weth: Bytes!
+  aquaPaused: Boolean!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  creationTransactionHash: Bytes!
+  updatedTransactionHash: Bytes!
+}
+
+type ChildRegistration @entity(immutable: false) {
+  id: Bytes!
+  registrationId: Bytes!
+  family: Family!
+  childWallet: Bytes!
+  ensNode: Bytes!
+  ensName: String!
+  child: Child
+  status: ChildRegistrationStatus!
+  proposedAt: BigInt!
+  resolvedAt: BigInt
+  resolvedBy: Bytes
+  updatedAt: BigInt!
+  proposalTransactionHash: Bytes!
+  resolutionTransactionHash: Bytes
+}
+
+type PendingChildRegistration @entity(immutable: false) {
+  id: Bytes!
+  registration: ChildRegistration!
+}
+
+type Child @entity(immutable: false) {
+  id: ID!
+  family: Family!
+  wallet: Bytes!
+  ensNode: Bytes!
+  ensName: String!
+  active: Boolean!
+  starBalance: BigInt!
+  totalStarsIssued: BigInt!
+  totalStarsBurned: BigInt!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+}
+
+type ChildWallet @entity(immutable: false) {
+  id: Bytes!
+  child: Child!
+}
+
+type StarBalance @entity(immutable: false) {
+  id: Bytes!
+  balance: BigInt!
+  totalIssued: BigInt!
+  totalBurned: BigInt!
+  updatedAt: BigInt!
+}

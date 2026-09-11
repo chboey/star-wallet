@@ -1,0 +1,16 @@
+{
+  "sepolia": {
+    "StarRegistry": {
+      "address": "0x23920ff112b125bad86e2e29b8986c4b29815886",
+      "startBlock": 11675795
+    },
+    "StarToken": {
+      "address": "0x5d5b0b72ea18aada8706412885ef64b53a2026fe",
+      "startBlock": 11675796
+    },
+    "StarFamilyVaultFactory": {
+      "address": "0x9849e859c38f4c28a900ec066472ce78e2b29567",
+      "startBlock": 11675798
+    }
+  }
+}

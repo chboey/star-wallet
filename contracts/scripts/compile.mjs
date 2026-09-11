@@ -166,3 +166,22 @@ await writeFile(
     "",
   ].join("\n"),
 );
+await mkdir(resolve(root, "subgraph/abis"), { recursive: true });
+await Promise.all([
+  writeFile(
+    resolve(root, "subgraph/abis/StarRegistry.json"),
+    `${JSON.stringify(registryAbi, null, 2)}\n`,
+  ),
+  writeFile(
+    resolve(root, "subgraph/abis/StarToken.json"),
+    `${JSON.stringify(starTokenAbi, null, 2)}\n`,
+  ),
+  writeFile(
+    resolve(root, "subgraph/abis/StarFamilyVault.json"),
+    `${JSON.stringify(familyVaultAbi, null, 2)}\n`,
+  ),
+  writeFile(
+    resolve(root, "subgraph/abis/StarFamilyVaultFactory.json"),
+    `${JSON.stringify(familyVaultFactoryAbi, null, 2)}\n`,
+  ),
+]);
