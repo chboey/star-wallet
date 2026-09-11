@@ -5,12 +5,14 @@
   "scripts": {
     "codegen": "graph codegen",
     "build": "graph build --network sepolia",
-    "check": "npm run codegen && npm run build"
+    "test:mappings": "graph test --version 0.6.0 --recompile",
+    "check": "npm run codegen && npm run build && npm run test:mappings"
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "0.38.2"
   },
   "devDependencies": {
-    "@graphprotocol/graph-cli": "^0.98.1"
+    "@graphprotocol/graph-cli": "^0.98.1",
+    "matchstick-as": "0.6.0"
   }
 }

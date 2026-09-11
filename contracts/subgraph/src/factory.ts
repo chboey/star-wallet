@@ -3,7 +3,11 @@ import {
   FamilyVaultCreated,
   StarFamilyVaultFactory,
 } from "../generated/StarFamilyVaultFactory/StarFamilyVaultFactory";
-import { StarFamilyVaultTemplate } from "../generated/templates";
+import {
+  StarFamilyVaultTemplate,
+  StarQuestsTemplate,
+} from "../generated/templates";
+import { StarFamilyVault } from "../generated/StarFamilyVaultFactory/StarFamilyVault";
 import { FamilyVault } from "../generated/schema";
 import { requireFamily } from "./helpers";
 
@@ -27,6 +31,8 @@ export function handleFamilyVaultCreated(event: FamilyVaultCreated): void {
   );
   const vault = new FamilyVault(event.params.vault);
   vault.family = familyId;
+  const questsAddress = StarFamilyVault.bind(event.params.vault).quests();
+  vault.questsAddress = questsAddress;
   vault.parent = event.params.parent;
   vault.emergencyAdmin = event.params.emergencyAdmin;
   vault.aqua = factory.aqua();
@@ -46,5 +52,7 @@ export function handleFamilyVaultCreated(event: FamilyVaultCreated): void {
 
   const context = new DataSourceContext();
   context.setString("familyId", familyId);
+  context.setString("vault", event.params.vault.toHexString());
   StarFamilyVaultTemplate.createWithContext(event.params.vault, context);
+  StarQuestsTemplate.createWithContext(questsAddress, context);
 }

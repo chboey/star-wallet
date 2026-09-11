@@ -1,5 +1,5 @@
 specVersion: 1.3.0
-description: Star Wallet family and Star balance read model on Sepolia
+description: Star Wallet family, goals, quests, and Star balance read model on Sepolia
 schema:
   file: ./schema.graphql
 indexerHints:
@@ -68,6 +68,53 @@ dataSources:
           handler: handleTransfer
       file: ./src/token.ts
   - kind: ethereum/contract
+    name: StarGoals
+    network: sepolia
+    source:
+      abi: StarGoals
+      address: "0x5b590d77cabee4ac8692a071b303095304c28416"
+      startBlock: 11675797
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Goal
+        - GoalRequest
+        - Redemption
+        - Child
+      abis:
+        - name: StarGoals
+          file: ./abis/StarGoals.json
+      eventHandlers:
+        - event: GoalCreated(indexed uint256,indexed uint256,uint256,string)
+          handler: handleGoalCreated
+        - event: GoalStarsAdded(indexed uint256,indexed uint256,uint256,uint256)
+          handler: handleGoalStarsAdded
+        - event: GoalRequested(indexed uint256,indexed
+            uint256,string,string,uint8,bytes32)
+          handler: handleGoalRequested
+        - event: GoalRequestApproved(indexed uint256,indexed uint256)
+          handler: handleGoalRequestApproved
+        - event: GoalRequestRejected(indexed uint256)
+          handler: handleGoalRequestRejected
+        - event: GoalRequestCancelled(indexed uint256)
+          handler: handleGoalRequestCancelled
+        - event: GoalCancelled(indexed uint256,indexed uint256)
+          handler: handleGoalCancelled
+        - event: GoalCompleted(indexed uint256,indexed uint256)
+          handler: handleGoalCompleted
+        - event: RedemptionRequested(indexed uint256,indexed uint256,indexed
+            uint256,uint256)
+          handler: handleRedemptionRequested
+        - event: RedemptionApproved(indexed uint256,indexed uint256)
+          handler: handleRedemptionApproved
+        - event: RedemptionRejected(indexed uint256,indexed uint256)
+          handler: handleRedemptionRejected
+        - event: RedemptionCancelled(indexed uint256,indexed uint256)
+          handler: handleRedemptionCancelled
+      file: ./src/goals.ts
+  - kind: ethereum/contract
     name: StarFamilyVaultFactory
     network: sepolia
     source:
@@ -84,12 +131,40 @@ dataSources:
       abis:
         - name: StarFamilyVaultFactory
           file: ./abis/StarFamilyVaultFactory.json
+        - name: StarFamilyVault
+          file: ./abis/StarFamilyVaultQuests.json
       eventHandlers:
         - event: FamilyVaultCreated(indexed uint256,indexed address,indexed
             address,address)
           handler: handleFamilyVaultCreated
       file: ./src/factory.ts
 templates:
+  - kind: ethereum/contract
+    name: StarQuestsTemplate
+    network: sepolia
+    source:
+      abi: StarQuests
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Quest
+        - StarRequest
+      abis:
+        - name: StarQuests
+          file: ./abis/StarQuests.json
+      eventHandlers:
+        - event: QuestCreated(indexed uint256,indexed uint256,uint256,string)
+          handler: handleQuestCreated
+        - event: QuestStatusUpdated(indexed uint256,uint8)
+          handler: handleQuestStatusUpdated
+        - event: StarRequestCreated(indexed uint256,indexed uint256,indexed
+            uint256,uint256,string,bytes32)
+          handler: handleStarRequestCreated
+        - event: StarRequestResolved(indexed uint256,uint8,uint256)
+          handler: handleStarRequestResolved
+      file: ./src/quests.ts
   - kind: ethereum/contract
     name: StarFamilyVaultTemplate
     network: sepolia

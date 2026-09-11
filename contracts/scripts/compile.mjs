@@ -177,6 +177,14 @@ await Promise.all([
     `${JSON.stringify(starTokenAbi, null, 2)}\n`,
   ),
   writeFile(
+    resolve(root, "subgraph/abis/StarGoals.json"),
+    `${JSON.stringify(starGoalsAbi, null, 2)}\n`,
+  ),
+  writeFile(
+    resolve(root, "subgraph/abis/StarQuests.json"),
+    `${JSON.stringify(questsAbi, null, 2)}\n`,
+  ),
+  writeFile(
     resolve(root, "subgraph/abis/StarFamilyVault.json"),
     `${JSON.stringify(familyVaultAbi, null, 2)}\n`,
   ),

@@ -8,6 +8,10 @@
       "address": "0x5d5b0b72ea18aada8706412885ef64b53a2026fe",
       "startBlock": 11675796
     },
+    "StarGoals": {
+      "address": "0x5b590d77cabee4ac8692a071b303095304c28416",
+      "startBlock": 11675797
+    },
     "StarFamilyVaultFactory": {
       "address": "0x9849e859c38f4c28a900ec066472ce78e2b29567",
       "startBlock": 11675798

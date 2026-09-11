@@ -6,6 +6,8 @@ cache/
 out/
 build/
 generated/
+contracts/subgraph/tests/.bin/
+contracts/subgraph/tests/.latest.json
 .env
 .env.*
 !.env.example

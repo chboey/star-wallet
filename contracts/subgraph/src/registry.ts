@@ -45,6 +45,7 @@ export function handleChildRegistered(event: ChildRegistered): void {
   const tokenBalance = StarBalance.load(event.params.wallet);
   child.starBalance =
     tokenBalance === null ? BigInt.zero() : tokenBalance.balance;
+  child.reservedStars = BigInt.zero();
   child.totalStarsIssued =
     tokenBalance === null ? BigInt.zero() : tokenBalance.totalIssued;
   child.totalStarsBurned =
