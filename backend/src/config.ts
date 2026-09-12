@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { getAddress, isAddress, type Address } from 'viem';
 import { normalize } from 'viem/ens';
 import { z } from 'zod';
@@ -99,6 +99,33 @@ const schema = z
       .max(253)
       .regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/)
       .default('localhost'),
+    CHILD_PAYMASTER_POLICY_ID: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[a-zA-Z0-9_-]+$/, 'Invalid paymaster policy ID')
+      .optional(),
+    // Operational abuse counters only; chain/subgraph remain the family-state authority.
+    CHILD_SECURITY_DB_PATH: z.string().trim().min(1).optional(),
+    CHILD_RPC_PER_MINUTE: z.coerce.number().int().min(10).max(600).default(60),
+    CHILD_RPC_PER_HOUR: z.coerce.number().int().min(10).max(10_000).default(360),
+    CHILD_SPONSORED_OPERATIONS_PER_DAY: z.coerce.number().int().min(1).max(1_000).default(60),
+    CHILD_GLOBAL_SPONSORED_OPERATIONS_PER_DAY: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(10_000)
+      .default(600),
+    CHILD_SPONSOR_BUDGET_WEI_PER_DAY: z.coerce
+      .bigint()
+      .positive()
+      .max(10n ** 18n)
+      .default(50_000_000_000_000_000n),
+    CHILD_GLOBAL_SPONSOR_BUDGET_WEI_PER_DAY: z.coerce
+      .bigint()
+      .positive()
+      .max(10n ** 19n)
+      .default(500_000_000_000_000_000n),
     CHAINLINK_ETH_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.ethUsdFeed),
     CHAINLINK_USDC_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.usdcUsdFeed),
     CHAINLINK_ETH_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(3_600),
@@ -116,6 +143,31 @@ const schema = z
     AQUA_MAX_POSITION_WETH_UNITS: z.coerce.bigint().positive().default(500_000_000_000_000_000n),
   })
   .superRefine((value, context) => {
+    if (value.NODE_ENV !== 'test' && value.CHILD_SECURITY_DB_PATH === ':memory:') {
+      context.addIssue({
+        code: 'custom',
+        path: ['CHILD_SECURITY_DB_PATH'],
+        message: 'Security counters must persist outside tests',
+      });
+    }
+    if (
+      value.NODE_ENV === 'production' &&
+      value.CHILD_PAYMASTER_POLICY_ID &&
+      (!value.CHILD_SECURITY_DB_PATH || !isAbsolute(value.CHILD_SECURITY_DB_PATH))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CHILD_SECURITY_DB_PATH'],
+        message: 'Production sponsorship requires an absolute path on a persistent local volume',
+      });
+    }
+    if (value.CHILD_SPONSOR_BUDGET_WEI_PER_DAY > value.CHILD_GLOBAL_SPONSOR_BUDGET_WEI_PER_DAY) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CHILD_SPONSOR_BUDGET_WEI_PER_DAY'],
+        message: 'Account sponsorship budget cannot exceed the global budget',
+      });
+    }
     if (value.AQUA_DEFAULT_PRICE_BAND_BPS > value.AQUA_MAX_PRICE_DEVIATION_BPS) {
       context.addIssue({
         code: 'custom',
