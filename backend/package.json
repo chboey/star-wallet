@@ -11,8 +11,10 @@
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
     "start": "node --env-file=.env dist/server.js",
     "ens:setup": "tsx --env-file=../contracts/.env scripts/ens-setup.ts",
-    "test:aqua:integration": "forge build --root ../contracts -q && node --import tsx --test integration/aqua-connector.test.ts",
     "test": "node --import tsx --test test/**/*.test.ts",
+    "test:aqua:integration": "forge build --root ../contracts -q && node --import tsx --test integration/aqua-connector.test.ts",
+    "test:parent-auth:integration": "forge build --root ../contracts -q && node --import tsx --test integration/parent-authorization.test.ts",
+    "test:sepolia:deployment": "node --import tsx --test integration/sepolia-deployment.test.ts",
     "test:ens:integration": "node --import tsx --test integration/ens-sepolia.test.ts",
     "lint": "eslint src scripts",
     "format": "prettier --write ."
