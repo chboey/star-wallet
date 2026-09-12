@@ -194,3 +194,147 @@ function graphResponse(block: number, hasIndexingErrors: boolean): Response {
     },
   });
 }
+
+test('supports indexed goal-allocation schema upgrades without inventing balances', async () => {
+  const queries: string[] = [];
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const { query } = JSON.parse(String(init?.body)) as { query: string };
+    queries.push(query);
+    if (query.includes('allocatedStars'))
+      return Response.json({
+        errors: [{ message: 'Cannot query field "allocatedStars" on type "Goal".' }],
+      });
+    return Response.json({
+      data: {
+        family: { id: '7', goals: [{ id: '1', starCost: '10' }] },
+        _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+      },
+    });
+  });
+  const graph = new GraphService(settings, rpc);
+
+  assert.deepEqual((await graph.family('7', { first: 100, skip: 0 }))?.goals, [
+    { id: '1', starCost: '10' },
+  ]);
+  assert.equal(queries.length, 2);
+  await graph.family('7', { first: 100, skip: 0 });
+  assert.equal(queries.length, 3);
+  assert.equal(queries[2]?.includes('allocatedStars'), false);
+});
+
+test('returns current goal allocations and does not retry unrelated schema failures', async () => {
+  const upstream = mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    assert.match((JSON.parse(String(init?.body)) as { query: string }).query, /allocatedStars/);
+    return Response.json({
+      data: {
+        family: { id: '7', goals: [{ id: '1', starCost: '10', allocatedStars: '4' }] },
+        _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+      },
+    });
+  });
+  const graph = new GraphService(settings, rpc);
+
+  assert.deepEqual((await graph.family('7', { first: 100, skip: 0 }))?.goals, [
+    { id: '1', starCost: '10', allocatedStars: '4' },
+  ]);
+  upstream.mock.mockImplementation(async () =>
+    Response.json({ errors: [{ message: 'Cannot query field "missing" on type "Goal".' }] }),
+  );
+  await assert.rejects(graph.family('7', { first: 100, skip: 0 }), {
+    code: 'SUBGRAPH_ERROR',
+  });
+  assert.equal(upstream.mock.callCount(), 2);
+});
+
+test('queries families by normalized parent address with indexing metadata', async () => {
+  let requestBody: { query: string; variables: Record<string, unknown> } | undefined;
+  mock.method(
+    globalThis,
+    'fetch',
+    async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body)) as typeof requestBody;
+      return Response.json({
+        data: {
+          families: [{ id: '7', parent: '0xabc' }],
+          _meta: { deployment, block: { number: 990, hash: rpcHash }, hasIndexingErrors: false },
+        },
+      });
+    },
+  );
+
+  const result = await new GraphService(settings, rpc).familiesByParent('0xAbC');
+
+  assert.equal(requestBody?.variables.parent, '0xabc');
+  assert.match(
+    requestBody?.query ?? '',
+    /families\(first: \$first, skip: \$skip, block: \$block, where: \{ parent: \$parent \}/,
+  );
+  assert.equal(result.nextOffset, null);
+  assert.equal(result.families[0]?.id, '7');
+  assert.equal(result.indexing.blockLag, 10);
+});
+
+test('looks up a normalized child wallet using an ID variable', async () => {
+  let requestBody: { query: string; variables: Record<string, unknown> } | undefined;
+  mock.method(
+    globalThis,
+    'fetch',
+    async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body)) as typeof requestBody;
+      return Response.json({
+        data: {
+          childWallet: { child: { id: '9', wallet: '0xabc' } },
+          _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+        },
+      });
+    },
+  );
+
+  const result = await new GraphService(settings, rpc).childByWallet('0xAbC', {
+    first: 10,
+    skip: 0,
+  });
+
+  assert.deepEqual(requestBody?.variables, { wallet: '0xabc', first: 10, skip: 0 });
+  assert.match(requestBody?.query ?? '', /\$wallet: ID!/);
+  assert.equal(result?.id, '9');
+});
+
+test('paginates family and child snapshots at the requested block hash', async () => {
+  let items = [{ id: '1' }, { id: '2' }];
+  const inputs: { query: string; variables: Record<string, unknown> }[] = [];
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const input = JSON.parse(String(init?.body)) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
+    inputs.push(input);
+    return Response.json({
+      data: {
+        family: { id: '7', children: [], savings: { activePosition: { executions: items } } },
+        childWallet: { child: { id: '9', goals: items } },
+        families: items,
+        _meta: {
+          deployment,
+          block: { number: 995, hash: rpcHash },
+          hasIndexingErrors: false,
+        },
+      },
+    });
+  });
+  const graph = new GraphService(settings, rpc);
+  const page = { first: 2, skip: 0, blockHash: rpcHash };
+
+  assert.equal((await graph.family('7', page))?.nextOffset, 2);
+  assert.equal((await graph.childByWallet('0xabc', page))?.nextOffset, 2);
+  assert.equal((await graph.familiesByParent('0xabc', page)).nextOffset, 2);
+  for (const input of inputs) {
+    assert.deepEqual(input.variables.block, { hash: rpcHash });
+    assert.match(input.query, /_meta\(block: \$block\)/);
+  }
+  items = [{ id: '3' }];
+  assert.equal((await graph.family('7', { ...page, skip: 2 }))?.nextOffset, null);
+  await assert.rejects(graph.family('7', { ...page, blockHash: `0x${'34'.repeat(32)}` }), {
+    code: 'SUBGRAPH_INVALID_RESPONSE',
+  });
+});
