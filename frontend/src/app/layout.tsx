@@ -6,6 +6,10 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { connection } from "next/server";
 import { Providers } from "@/components/providers";
+import "@/components/onboarding/styles/shared.css";
+import "@/components/onboarding/styles/welcome.css";
+import "@/components/onboarding/styles/wallet.css";
+import "@/components/onboarding/styles/family.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

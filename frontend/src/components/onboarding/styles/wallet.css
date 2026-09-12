@@ -1,0 +1,60 @@
+.wallet-step .center-copy {
+  margin-bottom: 16px;
+}
+
+.wallet-option,
+.connected-card {
+  width: 100%;
+  min-height: 80px;
+  padding: 11px;
+  border: 1px solid var(--lavender-line);
+  border-radius: 12px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  color: var(--navy);
+  background: white;
+  text-align: left;
+}
+
+.wallet-option {
+  cursor: pointer;
+}
+
+.wallet-option:hover {
+  border-color: #b9aaf5;
+  background: #fcfbff;
+}
+
+.wallet-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--purple);
+  background: var(--lavender);
+}
+
+.wallet-option strong,
+.connected-card strong {
+  display: block;
+  font-size: 14px;
+}
+
+.connected-card span:not(.wallet-avatar) {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.text-icon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  white-space: nowrap;
+}
