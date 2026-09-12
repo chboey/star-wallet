@@ -4,6 +4,7 @@ import "@fontsource/quicksand/600.css";
 import "@fontsource/quicksand/700.css";
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { connection } from "next/server";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
@@ -19,9 +20,11 @@ export const viewport: Viewport = {
   themeColor: "#ffffff",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
+  // A nonce belongs to one response, so never prerender/cache an HTML shell with an old nonce.
+  await connection();
   return (
     <html lang="en">
       <body>
