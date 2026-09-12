@@ -1,4 +1,9 @@
-import { childAccountAbi, childAccountFactoryAbi, registryAbi } from '@star/contracts/abi';
+import {
+  childAccountAbi,
+  childAccountFactoryAbi,
+  registryAbi,
+  starGoalsAbi,
+} from '@star/contracts/abi';
 import {
   createPublicClient,
   getAddress,
@@ -13,6 +18,8 @@ import { sepolia } from 'viem/chains';
 import type { Config } from '../config.js';
 import { badRequest } from '../errors.js';
 import type { ProtocolService } from './protocol.js';
+import { decodeChildCall } from '@star/contracts/child-account';
+import { entryPoint08Address } from 'viem/account-abstraction';
 
 export type ChildCredential = { id: string; publicKey: Hex };
 
@@ -189,5 +196,110 @@ export class ChildAccountService {
             ? ('PENDING' as const)
             : ('UNREGISTERED' as const),
     };
+  }
+
+  async forAction(kind: 'goal' | 'redemption', id: bigint) {
+    const { addresses } = await this.protocol.ensureReady();
+    const item =
+      kind === 'goal'
+        ? await this.client.readContract({
+            address: addresses.goals,
+            abi: starGoalsAbi,
+            functionName: 'getGoal',
+            args: [id],
+          })
+        : await this.client.readContract({
+            address: addresses.goals,
+            abi: starGoalsAbi,
+            functionName: 'getRedemption',
+            args: [id],
+          });
+    const child = await this.client.readContract({
+      address: addresses.registry,
+      abi: registryAbi,
+      functionName: 'getChild',
+      args: [item.childId],
+    });
+    const account = await this.resolve(child.wallet);
+    if (account.familyId !== child.familyId)
+      throw badRequest('CHILD_ACCOUNT_MISMATCH', 'The child belongs to a different family');
+    return account;
+  }
+
+  async validateCall(wallet: Address, callData: Hex) {
+    const account = await this.resolve(wallet);
+    const decoded = decodeChildCall(callData);
+    if (decoded.functionName === 'acceptRegistration') {
+      const { addresses } = await this.protocol.ensureReady();
+      const registration = await this.client.readContract({
+        address: addresses.registry,
+        abi: registryAbi,
+        functionName: 'getChildRegistration',
+        args: decoded.args,
+      });
+      if (
+        !account.active ||
+        getAddress(registration.childWallet) !== getAddress(wallet) ||
+        registration.familyId !== account.familyId ||
+        registration.ensNode !== account.ensNode
+      )
+        throw badRequest(
+          'CHILD_ACCOUNT_MISMATCH',
+          'Registration does not belong to this active child account',
+        );
+    } else if (decoded.functionName === 'addStarsToGoal') {
+      const expected = await this.forAction('goal', decoded.args[0]);
+      if (!account.active || getAddress(expected.wallet) !== getAddress(wallet))
+        throw badRequest(
+          'CHILD_ACCOUNT_MISMATCH',
+          'This goal does not belong to the active child account',
+        );
+      try {
+        // Read-only EntryPoint simulation checks ownership, remaining target and
+        // available on-chain Stars before any contribution is offered for signing.
+        await this.client.call({ account: entryPoint08Address, to: wallet, data: callData });
+      } catch {
+        throw badRequest(
+          'INVALID_GOAL_CONTRIBUTION',
+          'Cannot add these Stars. Check the goal and available Stars, and ensure the contribution contracts are deployed.',
+        );
+      }
+    } else if (
+      decoded.functionName === 'requestRedemption' ||
+      decoded.functionName === 'cancelRedemption'
+    ) {
+      const expected = await this.forAction(
+        decoded.functionName === 'requestRedemption' ? 'goal' : 'redemption',
+        decoded.args[0],
+      );
+      if (
+        getAddress(expected.wallet) !== getAddress(wallet) ||
+        (decoded.functionName === 'requestRedemption' && !account.active)
+      )
+        throw badRequest(
+          'CHILD_ACCOUNT_MISMATCH',
+          'This request does not belong to the active child account',
+        );
+    } else if (
+      [
+        'submitQuest',
+        'requestStars',
+        'cancelStarRequest',
+        'requestGoal',
+        'cancelGoalRequest',
+      ].includes(decoded.functionName)
+    ) {
+      try {
+        await this.client.call({ account: entryPoint08Address, to: wallet, data: callData });
+      } catch {
+        throw badRequest(
+          decoded.functionName === 'requestGoal' || decoded.functionName === 'cancelGoalRequest'
+            ? 'INVALID_GOAL_REQUEST'
+            : 'INVALID_QUEST_ACTION',
+          'This quest or goal request is unavailable or does not belong to this child',
+        );
+      }
+    } else
+      throw badRequest('UNSUPPORTED_CHILD_CALL', 'This method is not allowed for a child account');
   }
 }
