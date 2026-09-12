@@ -1,14 +1,17 @@
 import {
   childAccountAbi,
   childAccountFactoryAbi,
+  familyVaultAbi,
   familyVaultFactoryAbi,
   registryAbi,
+  starGoalsAbi,
 } from '@star/contracts/abi';
 import {
   encodeAbiParameters,
   encodeFunctionData,
   keccak256,
   namehash,
+  parseAbi,
   type Abi,
   type Address,
   type ContractFunctionArgs,
@@ -19,6 +22,8 @@ import { normalize } from 'viem/ens';
 import type { Config, ProtocolAddresses } from '../config.js';
 import { protocolAddresses } from '../config.js';
 import { badRequest } from '../errors.js';
+
+const erc20Abi = parseAbi(['function approve(address spender, uint256 amount) returns (bool)']);
 
 export type SignerRole = 'PARENT' | 'CHILD' | 'EMERGENCY_ADMIN';
 
@@ -192,6 +197,64 @@ export class IntentService {
           'setChildStatus',
           [childId, active],
           `${active ? 'Reactivate' : 'Deactivate'} child ${childId.toString()}`,
+        ),
+      ],
+    };
+  }
+
+  reward(input: { childId: bigint; stars: bigint; reason: string; vault: Address }) {
+    const principalUsdcUnits = input.stars * 1_000_000n;
+    return {
+      stars: input.stars.toString(),
+      principalUsdcUnits: principalUsdcUnits.toString(),
+      requiresUsdcAllowance: true,
+      rewardWriteIsAtomic: true,
+      intents: [
+        this.intent(
+          'PARENT',
+          this.addresses.usdc,
+          erc20Abi,
+          'approve',
+          [input.vault, principalUsdcUnits],
+          `Approve ${input.stars.toString()} USDC for the Star reward`,
+        ),
+        this.intent(
+          'PARENT',
+          input.vault,
+          familyVaultAbi,
+          'rewardStars',
+          [input.childId, input.stars, input.reason],
+          `Reward ${input.stars.toString()} Stars and contribute matching USDC atomically`,
+        ),
+      ],
+    };
+  }
+
+  createGoal(input: { childId: bigint; title: string; starCost: bigint }) {
+    return {
+      intents: [
+        this.intent(
+          'PARENT',
+          this.addresses.goals,
+          starGoalsAbi,
+          'createGoal',
+          [input.childId, input.title, input.starCost],
+          `Create the goal “${input.title}” for ${input.starCost.toString()} Stars`,
+        ),
+      ],
+    };
+  }
+
+  cancelGoal(goalId: bigint) {
+    return {
+      intents: [
+        this.intent(
+          'PARENT',
+          this.addresses.goals,
+          starGoalsAbi,
+          'cancelGoal',
+          [goalId],
+          `Cancel goal ${goalId.toString()}`,
         ),
       ],
     };

@@ -3,10 +3,19 @@ import test from 'node:test';
 import {
   childAccountAbi,
   childAccountFactoryAbi,
+  familyVaultAbi,
   familyVaultFactoryAbi,
   registryAbi,
+  starGoalsAbi,
 } from '@star/contracts/abi';
-import { decodeFunctionData, encodeAbiParameters, keccak256, namehash, type Hex } from 'viem';
+import {
+  decodeFunctionData,
+  encodeAbiParameters,
+  keccak256,
+  namehash,
+  parseAbi,
+  type Hex,
+} from 'viem';
 import { loadConfig, protocolAddresses } from '../src/config.js';
 import { IntentService } from '../src/services/intents.js';
 
@@ -16,6 +25,8 @@ const service = new IntentService(settings);
 const childWallet = '0x0000000000000000000000000000000000001001';
 const parent = '0x0000000000000000000000000000000000002001';
 const publicKey = `0x${'11'.repeat(32)}${'22'.repeat(32)}` as Hex;
+const vault = '0x0000000000000000000000000000000000003001';
+const erc20Abi = parseAbi(['function approve(address spender, uint256 amount) returns (bool)']);
 
 test('prepares parent-signed family registration with a normalized ENS node', () => {
   const prepared = service.createFamily('family.starwallet.eth');
@@ -169,5 +180,49 @@ test('prepares registration cancellation and parent-managed lifecycle changes', 
   assert.deepEqual(decodeFunctionData({ abi: registryAbi, data: childStatus.intents[0]!.data }), {
     functionName: 'setChildStatus',
     args: [7n, true],
+  });
+});
+
+test('prepares USDC approval followed by an atomic Star reward and savings contribution', () => {
+  const prepared = service.reward({
+    childId: 7n,
+    stars: 25n,
+    reason: 'Completed weekly chores',
+    vault,
+  });
+
+  assert.equal(prepared.stars, '25');
+  assert.equal(prepared.principalUsdcUnits, '25000000');
+  assert.equal(prepared.requiresUsdcAllowance, true);
+  assert.equal(prepared.rewardWriteIsAtomic, true);
+  assert.equal(prepared.intents[0]?.to, addresses.usdc);
+  assert.equal(prepared.intents[0]?.signerRole, 'PARENT');
+  assert.deepEqual(decodeFunctionData({ abi: erc20Abi, data: prepared.intents[0]!.data }), {
+    functionName: 'approve',
+    args: [vault, 25_000_000n],
+  });
+  assert.equal(prepared.intents[1]?.to, vault);
+  assert.equal(prepared.intents[1]?.signerRole, 'PARENT');
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: prepared.intents[1]!.data }), {
+    functionName: 'rewardStars',
+    args: [7n, 25n, 'Completed weekly chores'],
+  });
+});
+
+test('prepares parent-signed goal creation and cancellation', () => {
+  const creation = service.createGoal({ childId: 7n, title: 'Art set', starCost: 30n });
+  const cancellation = service.cancelGoal(9n);
+
+  assert.equal(creation.intents[0]?.to, addresses.goals);
+  assert.equal(creation.intents[0]?.signerRole, 'PARENT');
+  assert.deepEqual(decodeFunctionData({ abi: starGoalsAbi, data: creation.intents[0]!.data }), {
+    functionName: 'createGoal',
+    args: [7n, 'Art set', 30n],
+  });
+  assert.equal(cancellation.intents[0]?.to, addresses.goals);
+  assert.equal(cancellation.intents[0]?.signerRole, 'PARENT');
+  assert.deepEqual(decodeFunctionData({ abi: starGoalsAbi, data: cancellation.intents[0]!.data }), {
+    functionName: 'cancelGoal',
+    args: [9n],
   });
 });
