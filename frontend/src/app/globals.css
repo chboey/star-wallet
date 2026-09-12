@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --font-ui: "Quicksand", ui-sans-serif, system-ui, sans-serif;
+  --navy: #11134d;
+  --muted: #5d6089;
+  --purple: #6338f4;
+  --purple-dark: #4d24df;
+  --lavender: #f1edff;
+  --lavender-line: #ddd5fb;
+  --line: #d9dbea;
+  --surface: #ffffff;
+  --page: #fbfbfc;
+  --orange: #ff8c6d;
+  --gold: #f4aa20;
+  --success: #19805f;
+  --error: #a63b32;
+  --app-frame-width: 440px;
+  --app-content-inset: 28px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--page);
+}
+
+body {
+  margin: 0;
+  color: var(--navy);
+  background: var(--page);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 3px solid rgba(99, 56, 244, 0.2);
+  outline-offset: 2px;
+}
+
+.spin {
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 520px) {
+  :root {
+    --app-content-inset: 24px;
+  }
+}
+
+@media (max-width: 360px) {
+  :root {
+    --app-content-inset: 17px;
+  }
+}
