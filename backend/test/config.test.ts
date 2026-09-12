@@ -30,6 +30,26 @@ test('the default deployment manifest supplies canonical protocol addresses', ()
   assert.equal(addresses.weth, '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9');
 });
 
+test('paymaster policy configuration trims IDs and rejects malformed values', () => {
+  assert.equal(
+    loadConfig({
+      DEPLOYMENT_FILE: emptyManifest,
+      CHILD_PAYMASTER_POLICY_ID: '  policy-123_abc  ',
+    }).CHILD_PAYMASTER_POLICY_ID,
+    'policy-123_abc',
+  );
+  for (const value of ['', '   ', undefined])
+    assert.equal(
+      loadConfig({ DEPLOYMENT_FILE: emptyManifest, CHILD_PAYMASTER_POLICY_ID: value })
+        .CHILD_PAYMASTER_POLICY_ID,
+      undefined,
+    );
+  for (const value of ['policy with spaces', '{"policyId":"other"}', 'x'.repeat(129)])
+    assert.throws(() =>
+      loadConfig({ DEPLOYMENT_FILE: emptyManifest, CHILD_PAYMASTER_POLICY_ID: value }),
+    );
+});
+
 test('nonempty environment values override the manifest and normalize addresses', () => {
   const settings = loadConfig({
     STAR_REGISTRY_ADDRESS: '0x0000000000000000000000000000000000001234',

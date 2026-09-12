@@ -99,6 +99,8 @@ const schema = z
       .max(253)
       .regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/)
       .default('localhost'),
+    CHILD_BUNDLER_RPC_URL: optionalUrl,
+    CHILD_PAYMASTER_RPC_URL: optionalUrl,
     CHILD_PAYMASTER_POLICY_ID: z
       .string()
       .min(1)
