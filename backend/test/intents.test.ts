@@ -268,3 +268,49 @@ test('prepares child cancellation and parent approval or rejection of redemption
     args: [12n],
   });
 });
+
+test('prepares savings withdrawals independently from Star accounting', () => {
+  const recipient = '0x0000000000000000000000000000000000004001';
+  const prepared = service.withdrawSavings({
+    familyId: 42n,
+    vault,
+    amount: 15_000_000n,
+    recipient,
+  });
+
+  assert.equal(prepared.independentFromStars, true);
+  assert.equal(prepared.intents[0]?.to, vault);
+  assert.equal(prepared.intents[0]?.signerRole, 'PARENT');
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: prepared.intents[0]!.data }), {
+    functionName: 'withdrawSavings',
+    args: [15_000_000n, recipient],
+  });
+});
+
+test('prepares WETH approval and funding followed by independent withdrawals', () => {
+  const recipient = '0x0000000000000000000000000000000000004001';
+  const funding = service.fundStrategyWeth({ familyId: 42n, vault, amount: 2_000_000n });
+  const withdrawal = service.withdrawStrategyWeth({
+    familyId: 42n,
+    vault,
+    amount: 1_000_000n,
+    recipient,
+  });
+
+  assert.equal(funding.intents[0]?.to, addresses.weth);
+  assert.deepEqual(decodeFunctionData({ abi: erc20Abi, data: funding.intents[0]!.data }), {
+    functionName: 'approve',
+    args: [vault, 2_000_000n],
+  });
+  assert.equal(funding.intents[1]?.to, vault);
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: funding.intents[1]!.data }), {
+    functionName: 'fundStrategyWeth',
+    args: [2_000_000n],
+  });
+  assert.equal(withdrawal.intents[0]?.to, vault);
+  assert.equal(withdrawal.intents[0]?.signerRole, 'PARENT');
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: withdrawal.intents[0]!.data }), {
+    functionName: 'withdrawStrategyWeth',
+    args: [1_000_000n, recipient],
+  });
+});

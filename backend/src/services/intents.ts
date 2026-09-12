@@ -322,6 +322,65 @@ export class IntentService {
     };
   }
 
+  withdrawSavings(input: { familyId: bigint; vault: Address; amount: bigint; recipient: Address }) {
+    return {
+      independentFromStars: true,
+      intents: [
+        this.intent(
+          'PARENT',
+          input.vault,
+          familyVaultAbi,
+          'withdrawSavings',
+          [input.amount, input.recipient],
+          `Withdraw ${input.amount.toString()} USDC base units from available family savings`,
+        ),
+      ],
+    };
+  }
+
+  fundStrategyWeth(input: { familyId: bigint; vault: Address; amount: bigint }) {
+    return {
+      intents: [
+        this.intent(
+          'PARENT',
+          this.addresses.weth,
+          erc20Abi,
+          'approve',
+          [input.vault, input.amount],
+          `Approve ${input.amount.toString()} WETH base units for the family vault`,
+        ),
+        this.intent(
+          'PARENT',
+          input.vault,
+          familyVaultAbi,
+          'fundStrategyWeth',
+          [input.amount],
+          `Fund family ${input.familyId.toString()} strategy inventory with WETH`,
+        ),
+      ],
+    };
+  }
+
+  withdrawStrategyWeth(input: {
+    familyId: bigint;
+    vault: Address;
+    amount: bigint;
+    recipient: Address;
+  }) {
+    return {
+      intents: [
+        this.intent(
+          'PARENT',
+          input.vault,
+          familyVaultAbi,
+          'withdrawStrategyWeth',
+          [input.amount, input.recipient],
+          `Withdraw ${input.amount.toString()} WETH base units from available strategy inventory`,
+        ),
+      ],
+    };
+  }
+
   private intent<
     const TAbi extends Abi,
     TFunctionName extends ContractFunctionName<TAbi, 'nonpayable' | 'payable'>,
