@@ -1,6 +1,8 @@
 import {
   childAccountFactoryAbi,
+  familyVaultAbi,
   familyVaultFactoryAbi,
+  registryAbi,
   starGoalsAbi,
   starTokenAbi,
 } from '@star/contracts/abi';
@@ -9,6 +11,7 @@ import {
   getAddress,
   http,
   keccak256,
+  maxUint256,
   parseAbi,
   toBytes,
   zeroAddress,
@@ -19,7 +22,7 @@ import { entryPoint08Address } from 'viem/account-abstraction';
 import { sepoliaDeployment } from '@star/contracts/network';
 import type { Config, ProtocolAddresses } from '../config.js';
 import { protocolAddresses } from '../config.js';
-import { HttpError, unavailable } from '../errors.js';
+import { HttpError, badRequest, unavailable } from '../errors.js';
 
 const pinnedSepoliaTokens = { usdc: sepoliaDeployment.usdc, weth: sepoliaDeployment.weth };
 const pinnedSepoliaFeeds = {
@@ -56,6 +59,15 @@ export type ProtocolReadiness = {
     maxPositionWeth: string;
   };
 };
+
+export type FamilyVaultResolution = {
+  familyId: bigint;
+  vault: Address;
+  emergencyAdmin: Address;
+  paused: boolean;
+  positionActive: boolean;
+};
+
 export class ProtocolService {
   private readonly client;
   private cached?: { expiresAt: number; promise: Promise<ProtocolReadiness> };
@@ -76,6 +88,54 @@ export class ProtocolService {
     this.cached = { expiresAt: Date.now() + 30_000, promise };
     return promise;
   }
+
+  async resolveFamilyVault(familyId: bigint): Promise<FamilyVaultResolution> {
+    const { addresses } = await this.ensureReady();
+    try {
+      const rawVault = await this.client.readContract({
+        address: addresses.vaultFactory,
+        abi: familyVaultFactoryAbi,
+        functionName: 'vaultByFamily',
+        args: [familyId],
+      });
+      if (typeof rawVault !== 'string' || getAddress(rawVault) === zeroAddress) {
+        throw badRequest(
+          'FAMILY_VAULT_NOT_CREATED',
+          `Family ${familyId.toString()} does not have a factory-created vault`,
+        );
+      }
+      return await this.verifyFamilyVault(addresses, familyId, getAddress(rawVault));
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      throw unavailable('FAMILY_VAULT_UNAVAILABLE', 'Family vault resolution failed', {
+        familyId: familyId.toString(),
+        cause: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async resolveChildVault(childId: bigint): Promise<FamilyVaultResolution> {
+    const { addresses } = await this.ensureReady();
+    try {
+      const child = (await this.client.readContract({
+        address: addresses.registry,
+        abi: registryAbi,
+        functionName: 'getChild',
+        args: [childId],
+      })) as { familyId?: unknown };
+      if (typeof child.familyId !== 'bigint' || child.familyId === 0n) {
+        throw new Error('Registry returned an invalid child family ID');
+      }
+      return await this.resolveFamilyVault(child.familyId);
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      throw unavailable('CHILD_VAULT_UNAVAILABLE', 'Child family vault resolution failed', {
+        childId: childId.toString(),
+        cause: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async verifyCore(): Promise<ProtocolReadiness> {
     const addresses = protocolAddresses(this.settings);
     for (const [name, expected] of Object.entries(pinnedSepoliaTokens)) {
@@ -422,7 +482,226 @@ export class ProtocolService {
       },
     };
   }
+
+  private async verifyFamilyVault(
+    addresses: ProtocolAddresses,
+    familyId: bigint,
+    vault: Address,
+  ): Promise<FamilyVaultResolution> {
+    const code = await this.client.getCode({ address: vault });
+    if (!code || code === '0x') throw new Error(`Family vault ${vault} has no deployed bytecode`);
+
+    const [
+      registeredFamilyId,
+      reverseFamilyId,
+      vaultRegistry,
+      vaultStar,
+      vaultUsdc,
+      vaultWeth,
+      vaultAqua,
+      vaultSwapVm,
+      usdcPerStar,
+      maxStrategyFee,
+      emergencyAdmin,
+      aquaPaused,
+      vaultIsMinter,
+      vaultIsNotBurner,
+      usdcAquaAllowance,
+      wethAquaAllowance,
+      vaultEthUsdFeed,
+      vaultUsdcUsdFeed,
+      vaultEthUsdMaxAge,
+      vaultUsdcUsdMaxAge,
+      vaultMaxPriceDeviation,
+      vaultMaxLifetime,
+      vaultMaxPositionUsdc,
+      vaultMaxPositionWeth,
+      familyAccount,
+    ] = await Promise.all([
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'familyId' }),
+      this.client.readContract({
+        address: addresses.vaultFactory,
+        abi: familyVaultFactoryAbi,
+        functionName: 'familyIdByVault',
+        args: [vault],
+      }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'registry' }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'star' }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'usdc' }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'weth' }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'aqua' }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'swapVmApp' }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'USDC_PER_STAR',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'MAX_STRATEGY_FEE_BPS',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'emergencyAdmin',
+      }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'aquaPaused' }),
+      this.client.readContract({
+        address: addresses.token,
+        abi: starTokenAbi,
+        functionName: 'hasRole',
+        args: [minterRole, vault],
+      }),
+      this.client.readContract({
+        address: addresses.token,
+        abi: starTokenAbi,
+        functionName: 'hasRole',
+        args: [burnerRole, vault],
+      }),
+      this.client.readContract({
+        address: addresses.usdc,
+        abi: erc20MetadataAbi,
+        functionName: 'allowance',
+        args: [vault, addresses.aqua],
+      }),
+      this.client.readContract({
+        address: addresses.weth,
+        abi: erc20MetadataAbi,
+        functionName: 'allowance',
+        args: [vault, addresses.aqua],
+      }),
+      this.client.readContract({ address: vault, abi: familyVaultAbi, functionName: 'ethUsdFeed' }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'usdcUsdFeed',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'ethUsdMaxAgeSeconds',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'usdcUsdMaxAgeSeconds',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'maxStrategyPriceDeviationBps',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'maxStrategyLifetimeSeconds',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'maxPositionUsdc',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'maxPositionWeth',
+      }),
+      this.client.readContract({
+        address: vault,
+        abi: familyVaultAbi,
+        functionName: 'getFamilyAccount',
+      }),
+    ]);
+
+    assertBigInt('vault family ID', registeredFamilyId, familyId);
+    assertBigInt('factory reverse family ID', reverseFamilyId, familyId);
+    assertAddress('vault registry', vaultRegistry, addresses.registry);
+    assertAddress('vault STAR', vaultStar, addresses.token);
+    assertAddress('vault USDC', vaultUsdc, addresses.usdc);
+    assertAddress('vault WETH', vaultWeth, addresses.weth);
+    assertAddress('vault Aqua', vaultAqua, addresses.aqua);
+    assertAddress('vault SwapVM', vaultSwapVm, addresses.swapVm);
+    assertBigInt('USDC per STAR', usdcPerStar, 1_000_000n);
+    assertNumber('maximum strategy fee', maxStrategyFee, 1_000);
+    if (
+      !this.settings.CHAINLINK_ETH_USD_FEED_ADDRESS ||
+      !this.settings.CHAINLINK_USDC_USD_FEED_ADDRESS
+    ) {
+      throw new Error('Chainlink safety feeds are not configured');
+    }
+    assertAddress('vault ETH/USD feed', vaultEthUsdFeed, pinnedSepoliaFeeds.ethUsd);
+    assertAddress('vault USDC/USD feed', vaultUsdcUsdFeed, pinnedSepoliaFeeds.usdcUsd);
+    assertNumber(
+      'vault ETH/USD maximum age',
+      vaultEthUsdMaxAge,
+      this.settings.CHAINLINK_ETH_USD_MAX_AGE_SECONDS,
+    );
+    assertNumber(
+      'vault USDC/USD maximum age',
+      vaultUsdcUsdMaxAge,
+      this.settings.CHAINLINK_USDC_USD_MAX_AGE_SECONDS,
+    );
+    assertNumber(
+      'vault maximum price deviation',
+      vaultMaxPriceDeviation,
+      this.settings.AQUA_MAX_PRICE_DEVIATION_BPS,
+    );
+    assertNumber(
+      'vault maximum strategy lifetime',
+      vaultMaxLifetime,
+      this.settings.AQUA_MAX_STRATEGY_LIFETIME_SECONDS,
+    );
+    assertBigInt(
+      'vault maximum position USDC',
+      vaultMaxPositionUsdc,
+      this.settings.AQUA_MAX_POSITION_USDC_UNITS,
+    );
+    assertBigInt(
+      'vault maximum position WETH',
+      vaultMaxPositionWeth,
+      this.settings.AQUA_MAX_POSITION_WETH_UNITS,
+    );
+    if (typeof emergencyAdmin !== 'string' || getAddress(emergencyAdmin) === zeroAddress) {
+      throw new Error('Vault emergency admin is not configured');
+    }
+    if (typeof aquaPaused !== 'boolean') throw new Error('Invalid Aqua pause state');
+    if (
+      typeof familyAccount !== 'object' ||
+      familyAccount === null ||
+      !('positionActive' in familyAccount) ||
+      typeof familyAccount.positionActive !== 'boolean'
+    ) {
+      throw new Error('Family vault returned an invalid Aqua position state');
+    }
+    if (vaultIsMinter !== true || vaultIsNotBurner !== false) {
+      throw new Error('Family vault STAR roles do not match the intended authority');
+    }
+    assertVaultAquaAllowance('vault USDC Aqua allowance', usdcAquaAllowance, aquaPaused);
+    assertVaultAquaAllowance('vault WETH Aqua allowance', wethAquaAllowance, aquaPaused);
+
+    return {
+      familyId,
+      vault,
+      emergencyAdmin: getAddress(emergencyAdmin),
+      paused: aquaPaused,
+      positionActive: familyAccount.positionActive,
+    };
+  }
 }
+
+/** Allowances are spendable balances, not immutable vault configuration. */
+export function assertVaultAquaAllowance(name: string, actual: unknown, paused: boolean): void {
+  if (typeof actual !== 'bigint' || actual < 0n || actual > maxUint256) {
+    throw new Error(`${name} is not a valid uint256 allowance`);
+  }
+  // A paused vault must have revoked both approvals. When unpaused, even an
+  // exhausted allowance must not block unrelated Star requests or docking.
+  // Aqua/token transferFrom and the funding flow's simulation enforce enough
+  // allowance for actual token spending; some tokens decrement max approvals.
+  if (paused) assertBigInt(name, actual, 0n);
+}
+
 function assertAddress(name: string, actual: unknown, expected: Address): void {
   if (typeof actual !== 'string' || getAddress(actual) !== getAddress(expected)) {
     throw new Error(`${name} is ${String(actual)}; expected ${expected}`);
