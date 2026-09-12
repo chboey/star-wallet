@@ -61,3 +61,18 @@ test('runtime hashes and deployed safety settings are validated with their proto
   );
   assert.throws(() => loadConfig({ CHILD_ACCOUNT_RP_ID: 'https://example.com' }));
 });
+
+test('Aqua builder defaults cannot exceed the deployed protocol limits', () => {
+  const settings = loadConfig({});
+  assert.equal(settings.AQUA_DEFAULT_PRICE_BAND_BPS, 500);
+  assert.equal(settings.AQUA_DEFAULT_STRATEGY_LIFETIME_SECONDS, 900);
+  assert.throws(() =>
+    loadConfig({ AQUA_DEFAULT_PRICE_BAND_BPS: '1001', AQUA_MAX_PRICE_DEVIATION_BPS: '1000' }),
+  );
+  assert.throws(() =>
+    loadConfig({
+      AQUA_DEFAULT_STRATEGY_LIFETIME_SECONDS: '1801',
+      AQUA_MAX_STRATEGY_LIFETIME_SECONDS: '1800',
+    }),
+  );
+});

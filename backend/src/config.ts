@@ -27,48 +27,72 @@ const booleanString = z
   .default('false')
   .transform((value) => value === 'true');
 
-const schema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  HOST: z.string().default('127.0.0.1'),
-  PORT: z.coerce.number().int().positive().default(3000),
-  LOG_LEVEL: z.string().default('info'),
-  TRUST_PROXY: booleanString,
-  CHAIN_ID: z.coerce
-    .number()
-    .refine((value) => value === 11155111, 'CHAIN_ID must be Ethereum Sepolia 11155111')
-    .default(11155111),
-  SEPOLIA_RPC_URL: z.string().url().default(sepoliaDeployment.rpcUrl),
-  DEPLOYMENT_FILE: z.string().optional(),
-  STAR_REGISTRY_ADDRESS: optionalAddress,
-  STAR_TOKEN_ADDRESS: optionalAddress,
-  STAR_GOALS_ADDRESS: optionalAddress,
-  STAR_FAMILY_VAULT_FACTORY_ADDRESS: optionalAddress,
-  STAR_CHILD_ACCOUNT_FACTORY_ADDRESS: optionalAddress,
-  USDC_ADDRESS: optionalAddress.default(sepoliaDeployment.usdc),
-  WETH_ADDRESS: optionalAddress.default(sepoliaDeployment.weth),
-  AQUA_ADDRESS: optionalAddress,
-  AQUA_SWAP_VM_ADDRESS: optionalAddress,
-  STAR_REGISTRY_RUNTIME_CODE_HASH: optionalBytes32,
-  STAR_TOKEN_RUNTIME_CODE_HASH: optionalBytes32,
-  STAR_GOALS_RUNTIME_CODE_HASH: optionalBytes32,
-  STAR_FAMILY_VAULT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
-  STAR_CHILD_ACCOUNT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
-  AQUA_RUNTIME_CODE_HASH: optionalBytes32,
-  AQUA_SWAP_VM_RUNTIME_CODE_HASH: optionalBytes32,
-  CHILD_ACCOUNT_RP_ID: z
-    .string()
-    .max(253)
-    .regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/)
-    .default('localhost'),
-  CHAINLINK_ETH_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.ethUsdFeed),
-  CHAINLINK_USDC_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.usdcUsdFeed),
-  CHAINLINK_ETH_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(3_600),
-  CHAINLINK_USDC_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(90_000),
-  AQUA_MAX_PRICE_DEVIATION_BPS: z.coerce.number().int().min(25).max(2_500).default(1_000),
-  AQUA_MAX_STRATEGY_LIFETIME_SECONDS: z.coerce.number().int().min(120).max(86_400).default(1_800),
-  AQUA_MAX_POSITION_USDC_UNITS: z.coerce.bigint().positive().default(1_000_000_000n),
-  AQUA_MAX_POSITION_WETH_UNITS: z.coerce.bigint().positive().default(500_000_000_000_000_000n),
-});
+const schema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    HOST: z.string().default('127.0.0.1'),
+    PORT: z.coerce.number().int().positive().default(3000),
+    LOG_LEVEL: z.string().default('info'),
+    TRUST_PROXY: booleanString,
+    CHAIN_ID: z.coerce
+      .number()
+      .refine((value) => value === 11155111, 'CHAIN_ID must be Ethereum Sepolia 11155111')
+      .default(11155111),
+    SEPOLIA_RPC_URL: z.string().url().default(sepoliaDeployment.rpcUrl),
+    DEPLOYMENT_FILE: z.string().optional(),
+    STAR_REGISTRY_ADDRESS: optionalAddress,
+    STAR_TOKEN_ADDRESS: optionalAddress,
+    STAR_GOALS_ADDRESS: optionalAddress,
+    STAR_FAMILY_VAULT_FACTORY_ADDRESS: optionalAddress,
+    STAR_CHILD_ACCOUNT_FACTORY_ADDRESS: optionalAddress,
+    USDC_ADDRESS: optionalAddress.default(sepoliaDeployment.usdc),
+    WETH_ADDRESS: optionalAddress.default(sepoliaDeployment.weth),
+    AQUA_ADDRESS: optionalAddress,
+    AQUA_SWAP_VM_ADDRESS: optionalAddress,
+    STAR_REGISTRY_RUNTIME_CODE_HASH: optionalBytes32,
+    STAR_TOKEN_RUNTIME_CODE_HASH: optionalBytes32,
+    STAR_GOALS_RUNTIME_CODE_HASH: optionalBytes32,
+    STAR_FAMILY_VAULT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
+    STAR_CHILD_ACCOUNT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
+    AQUA_RUNTIME_CODE_HASH: optionalBytes32,
+    AQUA_SWAP_VM_RUNTIME_CODE_HASH: optionalBytes32,
+    CHILD_ACCOUNT_RP_ID: z
+      .string()
+      .max(253)
+      .regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/)
+      .default('localhost'),
+    CHAINLINK_ETH_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.ethUsdFeed),
+    CHAINLINK_USDC_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.usdcUsdFeed),
+    CHAINLINK_ETH_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(3_600),
+    CHAINLINK_USDC_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(90_000),
+    AQUA_DEFAULT_PRICE_BAND_BPS: z.coerce.number().int().min(25).max(2_500).default(500),
+    AQUA_MAX_PRICE_DEVIATION_BPS: z.coerce.number().int().min(25).max(2_500).default(1_000),
+    AQUA_DEFAULT_STRATEGY_LIFETIME_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(120)
+      .max(86_400)
+      .default(900),
+    AQUA_MAX_STRATEGY_LIFETIME_SECONDS: z.coerce.number().int().min(120).max(86_400).default(1_800),
+    AQUA_MAX_POSITION_USDC_UNITS: z.coerce.bigint().positive().default(1_000_000_000n),
+    AQUA_MAX_POSITION_WETH_UNITS: z.coerce.bigint().positive().default(500_000_000_000_000_000n),
+  })
+  .superRefine((value, context) => {
+    if (value.AQUA_DEFAULT_PRICE_BAND_BPS > value.AQUA_MAX_PRICE_DEVIATION_BPS) {
+      context.addIssue({
+        code: 'custom',
+        path: ['AQUA_DEFAULT_PRICE_BAND_BPS'],
+        message: 'Default Aqua price band cannot exceed the on-chain maximum deviation',
+      });
+    }
+    if (value.AQUA_DEFAULT_STRATEGY_LIFETIME_SECONDS > value.AQUA_MAX_STRATEGY_LIFETIME_SECONDS) {
+      context.addIssue({
+        code: 'custom',
+        path: ['AQUA_DEFAULT_STRATEGY_LIFETIME_SECONDS'],
+        message: 'Default Aqua strategy lifetime cannot exceed the on-chain maximum lifetime',
+      });
+    }
+  });
 
 export type Config = z.infer<typeof schema>;
 
