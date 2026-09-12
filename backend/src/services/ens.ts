@@ -24,7 +24,9 @@ import {
   ensFactoryAbi,
   ensProxyAddress,
   ensRegistryAbi,
+  ensResolverAbi,
   type EnsPlan,
+  type EnsFamilyPlan,
 } from './ens-v2.js';
 
 type Snapshot = { number: bigint; timestamp: bigint };
@@ -172,6 +174,123 @@ export class EnsService {
           abi: ensRegistryAbi,
           functionName: 'grantRootRoles',
           args: [ENS_REGISTRAR_ROLE, registrar],
+        }),
+        block,
+      );
+    });
+  }
+
+  /** Public family claims are caller-bound; parents never get root namespace roles. */
+  async prepareFamily(input: {
+    signer: Address;
+    label: string;
+    secret: Hex;
+  }): Promise<EnsFamilyPlan> {
+    const signer = nonzero(input.signer);
+    const label = input.label;
+    if (!/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/.test(label) || label.slice(2, 4) === '--')
+      throw badRequest(
+        'INVALID_ENS_LABEL',
+        'Family labels must be 2–63 lowercase letters, digits or interior hyphens',
+      );
+    if (!/^0x[0-9a-fA-F]{64}$/.test(input.secret) || /^0x0{64}$/.test(input.secret))
+      throw badRequest(
+        'INVALID_ENS_COMMITMENT',
+        'A nonzero random 32-byte commitment secret is required',
+      );
+    const name = `${label}.${this.parentName}`;
+    return this.withSnapshot(async (block) => {
+      const parent = await this.readNamespace(this.parentName, block);
+      if (same(parent.subregistry, zeroAddress))
+        throw unavailable(
+          'ENS_SETUP_REQUIRED',
+          'The app owner must finish ENS setup before families can register',
+        );
+      await this.verifyRegistry(parent.subregistry, parent, block);
+      const registry = {
+        address: parent.subregistry,
+        abi: ensRegistryAbi,
+        blockNumber: block.number,
+      };
+      const tokenId = await this.client.readContract({
+        ...registry,
+        functionName: 'findTokenId',
+        args: [label],
+      });
+      const state = await this.client.readContract({
+        ...registry,
+        functionName: 'getState',
+        args: [tokenId],
+      });
+      if (state.status !== 0) {
+        if (state.status !== 2 || !same(state.latestOwner, signer))
+          throw new HttpError(
+            409,
+            'ENS_NAME_UNAVAILABLE',
+            'This family name is already registered or reserved',
+          );
+        const resolver = await this.client.readContract({
+          ...registry,
+          functionName: 'getResolver',
+          args: [label],
+        });
+        await this.verifyResolver(resolver, signer, name, signer, block);
+        const resolved = await this.client.getEnsAddress({
+          name,
+          universalResolverAddress: deployment.ensUniversalResolver,
+          blockNumber: block.number,
+        });
+        if (!resolved || !same(resolved, signer))
+          throw unavailable(
+            'ENS_RESOLUTION_MISMATCH',
+            'The family name does not resolve to its parent',
+          );
+        return this.ready(name, block);
+      }
+      const registrar = await this.verifyFamilyRegistrar(parent, block, true);
+      const contract = { address: registrar, abi: ensRegistrarAbi, blockNumber: block.number };
+      const commitment = await this.client.readContract({
+        ...contract,
+        functionName: 'makeCommitment',
+        args: [label, signer, input.secret],
+      });
+      const [committedAt, minAge, maxAge] = await Promise.all([
+        this.client.readContract({
+          ...contract,
+          functionName: 'commitments',
+          args: [signer, commitment],
+        }),
+        this.client.readContract({ ...contract, functionName: 'MIN_COMMITMENT_AGE' }),
+        this.client.readContract({ ...contract, functionName: 'MAX_COMMITMENT_AGE' }),
+      ]);
+      if (committedAt === 0n || block.timestamp > committedAt + maxAge)
+        return this.transaction(
+          'COMMIT_FAMILY_NAME',
+          name,
+          signer,
+          registrar,
+          encodeFunctionData({ abi: ensRegistrarAbi, functionName: 'commit', args: [commitment] }),
+          block,
+        );
+      if (block.timestamp < committedAt + minAge)
+        return {
+          status: 'WAITING',
+          name,
+          checkedAtBlock: block.number.toString(),
+          readyAt: (committedAt + minAge).toString(),
+          step: null,
+          transaction: null,
+          requiresConfirmation: false,
+        };
+      return this.transaction(
+        'REGISTER_FAMILY_NAME',
+        name,
+        signer,
+        registrar,
+        encodeFunctionData({
+          abi: ensRegistrarAbi,
+          functionName: 'registerFamily',
+          args: [label, input.secret],
         }),
         block,
       );
@@ -435,6 +554,38 @@ export class EnsService {
         409,
         'ENS_REGISTRY_PARENT_MISMATCH',
         'The child registry is attached to a different parent',
+      );
+  }
+
+  private async verifyResolver(
+    proxy: Address,
+    owner: Address,
+    name: string,
+    target: Address,
+    block: Snapshot,
+  ) {
+    await this.verifyImplementation(proxy, deployment.ensPermissionedResolverImplementation, block);
+    const [permitted, address] = await Promise.all([
+      this.client.readContract({
+        address: proxy,
+        abi: ensResolverAbi,
+        functionName: 'hasRootRoles',
+        args: [ENS_OWNER_ROLES, owner],
+        blockNumber: block.number,
+      }),
+      this.client.readContract({
+        address: proxy,
+        abi: ensResolverAbi,
+        functionName: 'addr',
+        args: [namehash(name)],
+        blockNumber: block.number,
+      }),
+    ]);
+    if (!permitted || !same(address, target))
+      throw new HttpError(
+        409,
+        'ENS_RESOLVER_MISMATCH',
+        'The resolver owner or address differs from this request',
       );
   }
 
