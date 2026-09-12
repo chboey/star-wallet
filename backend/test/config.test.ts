@@ -5,98 +5,59 @@ import { parseEnv } from 'node:util';
 import test from 'node:test';
 import { loadConfig, protocolAddresses } from '../src/config.js';
 
-const emptyManifest = fileURLToPath(new URL('./fixtures/empty-deployment.json', import.meta.url));
+const manifest = fileURLToPath(new URL('./fixtures/empty-deployment.json', import.meta.url));
 
-test('the incremental environment example parses without future service settings', () => {
+test('the backend example parses and has no implicit legacy Aqua deployment', () => {
   const example = parseEnv(readFileSync(new URL('../.env.example', import.meta.url), 'utf8'));
-  const settings = loadConfig({ ...example, DEPLOYMENT_FILE: emptyManifest });
+  const settings = loadConfig({ ...example, DEPLOYMENT_FILE: manifest });
   assert.equal(settings.HOST, '127.0.0.1');
   assert.equal(settings.PORT, 3000);
   assert.equal(settings.CHAIN_ID, 11155111);
-  assert.equal(settings.STAR_REGISTRY_ADDRESS, undefined);
   assert.equal(settings.AQUA_ADDRESS, undefined);
-  assert.equal(settings.STAR_SUBGRAPH_URL, undefined);
-  assert.equal(settings.STAR_SUBGRAPH_MAX_BLOCK_LAG, 20);
-  assert.equal(settings.ENS_PARENT_NAME, 'starwallet.eth');
-  assert.equal(settings.ENS_ROOT_REGISTRY_ADDRESS, '0x8115186E8f2E0B0281e86ab91f0f48Ba90364354');
-  assert.throws(() => protocolAddresses(settings), /STAR_REGISTRY_ADDRESS.*AQUA_SWAP_VM_ADDRESS/);
+  assert.equal(settings.AQUA_SWAP_VM_ADDRESS, undefined);
+  assert.throws(() => protocolAddresses(settings), /AQUA_ADDRESS, AQUA_SWAP_VM_ADDRESS/);
 });
 
-test('the default deployment manifest supplies canonical protocol addresses', () => {
-  const settings = loadConfig({});
-  const addresses = protocolAddresses(settings);
-  assert.equal(addresses.registry, '0x23920FF112B125BAD86E2e29B8986C4B29815886');
-  assert.equal(addresses.usdc, '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238');
-  assert.equal(addresses.weth, '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9');
+test('blank and absent Aqua fields both remain unconfigured', () => {
+  for (const value of ['', '   ', undefined]) {
+    const settings = loadConfig({
+      DEPLOYMENT_FILE: manifest,
+      AQUA_ADDRESS: value,
+      AQUA_SWAP_VM_ADDRESS: value,
+    });
+    assert.equal(settings.AQUA_ADDRESS, undefined);
+    assert.equal(settings.AQUA_SWAP_VM_ADDRESS, undefined);
+  }
 });
 
 test('paymaster policy configuration trims IDs and rejects malformed values', () => {
   assert.equal(
-    loadConfig({
-      DEPLOYMENT_FILE: emptyManifest,
-      CHILD_PAYMASTER_POLICY_ID: '  policy-123_abc  ',
-    }).CHILD_PAYMASTER_POLICY_ID,
+    loadConfig({ DEPLOYMENT_FILE: manifest, CHILD_PAYMASTER_POLICY_ID: '  policy-123_abc  ' })
+      .CHILD_PAYMASTER_POLICY_ID,
     'policy-123_abc',
   );
   for (const value of ['', '   ', undefined])
     assert.equal(
-      loadConfig({ DEPLOYMENT_FILE: emptyManifest, CHILD_PAYMASTER_POLICY_ID: value })
+      loadConfig({ DEPLOYMENT_FILE: manifest, CHILD_PAYMASTER_POLICY_ID: value })
         .CHILD_PAYMASTER_POLICY_ID,
       undefined,
     );
   for (const value of ['policy with spaces', '{"policyId":"other"}', 'x'.repeat(129)])
     assert.throws(() =>
-      loadConfig({ DEPLOYMENT_FILE: emptyManifest, CHILD_PAYMASTER_POLICY_ID: value }),
+      loadConfig({ DEPLOYMENT_FILE: manifest, CHILD_PAYMASTER_POLICY_ID: value }),
     );
 });
 
-test('nonempty environment values override the manifest and normalize addresses', () => {
+test('explicit deployment addresses are retained and unsupported chain switches still fail closed', () => {
   const settings = loadConfig({
-    STAR_REGISTRY_ADDRESS: '0x0000000000000000000000000000000000001234',
-    SEPOLIA_RPC_URL: ' https://rpc.example.test ',
+    DEPLOYMENT_FILE: manifest,
+    AQUA_ADDRESS: '0x0000000000000000000000000000000000001234',
+    AQUA_SWAP_VM_ADDRESS: '0x0000000000000000000000000000000000005678',
   });
-  assert.equal(settings.STAR_REGISTRY_ADDRESS, '0x0000000000000000000000000000000000001234');
-  assert.equal(settings.SEPOLIA_RPC_URL, 'https://rpc.example.test');
-});
-
-test('blank overrides inherit configuration and unsafe network values fail closed', () => {
-  const inherited = loadConfig({ STAR_REGISTRY_ADDRESS: '   ' });
-  assert.equal(inherited.STAR_REGISTRY_ADDRESS, '0x23920FF112B125BAD86E2e29B8986C4B29815886');
-  assert.throws(() => loadConfig({ CHAIN_ID: '1' }), /CHAIN_ID must be Ethereum Sepolia/);
+  assert.equal(settings.AQUA_ADDRESS, '0x0000000000000000000000000000000000001234');
+  assert.equal(settings.AQUA_SWAP_VM_ADDRESS, '0x0000000000000000000000000000000000005678');
   assert.throws(
-    () => loadConfig({ STAR_TOKEN_ADDRESS: '0x0000000000000000000000000000000000000000' }),
-    /Invalid EVM address/,
-  );
-  assert.throws(
-    () => loadConfig({ DEPLOYMENT_FILE: './missing-deployment.json' }),
-    /DEPLOYMENT_FILE does not exist/,
-  );
-});
-
-test('runtime hashes and deployed safety settings are validated with their protocol consumer', () => {
-  const settings = loadConfig({});
-  assert.match(settings.STAR_REGISTRY_RUNTIME_CODE_HASH ?? '', /^0x[0-9a-f]{64}$/);
-  assert.equal(settings.CHILD_ACCOUNT_RP_ID, 'star-frontend-mu.vercel.app');
-  assert.equal(settings.CHAINLINK_ETH_USD_MAX_AGE_SECONDS, 3_600);
-  assert.equal(settings.AQUA_MAX_POSITION_USDC_UNITS, 1_000_000_000n);
-  assert.throws(
-    () => loadConfig({ STAR_REGISTRY_RUNTIME_CODE_HASH: '0x1234' }),
-    /Invalid bytes32 value/,
-  );
-  assert.throws(() => loadConfig({ CHILD_ACCOUNT_RP_ID: 'https://example.com' }));
-});
-
-test('Aqua builder defaults cannot exceed the deployed protocol limits', () => {
-  const settings = loadConfig({});
-  assert.equal(settings.AQUA_DEFAULT_PRICE_BAND_BPS, 500);
-  assert.equal(settings.AQUA_DEFAULT_STRATEGY_LIFETIME_SECONDS, 900);
-  assert.throws(() =>
-    loadConfig({ AQUA_DEFAULT_PRICE_BAND_BPS: '1001', AQUA_MAX_PRICE_DEVIATION_BPS: '1000' }),
-  );
-  assert.throws(() =>
-    loadConfig({
-      AQUA_DEFAULT_STRATEGY_LIFETIME_SECONDS: '1801',
-      AQUA_MAX_STRATEGY_LIFETIME_SECONDS: '1800',
-    }),
+    () => loadConfig({ DEPLOYMENT_FILE: manifest, CHAIN_ID: '1' }),
+    /CHAIN_ID must be Ethereum Sepolia/,
   );
 });

@@ -83,17 +83,11 @@ const schema = z
     STAR_GOALS_ADDRESS: optionalAddress,
     STAR_FAMILY_VAULT_FACTORY_ADDRESS: optionalAddress,
     STAR_CHILD_ACCOUNT_FACTORY_ADDRESS: optionalAddress,
-    USDC_ADDRESS: optionalAddress.default(sepoliaDeployment.usdc),
-    WETH_ADDRESS: optionalAddress.default(sepoliaDeployment.weth),
-    AQUA_ADDRESS: optionalAddress,
-    AQUA_SWAP_VM_ADDRESS: optionalAddress,
     STAR_REGISTRY_RUNTIME_CODE_HASH: optionalBytes32,
     STAR_TOKEN_RUNTIME_CODE_HASH: optionalBytes32,
     STAR_GOALS_RUNTIME_CODE_HASH: optionalBytes32,
     STAR_FAMILY_VAULT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
     STAR_CHILD_ACCOUNT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
-    AQUA_RUNTIME_CODE_HASH: optionalBytes32,
-    AQUA_SWAP_VM_RUNTIME_CODE_HASH: optionalBytes32,
     CHILD_ACCOUNT_RP_ID: z
       .string()
       .max(253)
@@ -128,6 +122,12 @@ const schema = z
       .positive()
       .max(10n ** 19n)
       .default(500_000_000_000_000_000n),
+    USDC_ADDRESS: optionalAddress.default(sepoliaDeployment.usdc),
+    WETH_ADDRESS: optionalAddress.default(sepoliaDeployment.weth),
+    AQUA_ADDRESS: optionalAddress,
+    AQUA_SWAP_VM_ADDRESS: optionalAddress,
+    AQUA_RUNTIME_CODE_HASH: optionalBytes32,
+    AQUA_SWAP_VM_RUNTIME_CODE_HASH: optionalBytes32,
     CHAINLINK_ETH_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.ethUsdFeed),
     CHAINLINK_USDC_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.usdcUsdFeed),
     CHAINLINK_ETH_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(3_600),

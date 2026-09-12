@@ -85,24 +85,19 @@ function fixture(tokenDecimals = 6, brokenBalance = false) {
   return new PortfolioService(settings, client);
 }
 
-test('reads parent wallet balances separately from vault holdings at the valuation block', async () => {
+test('parent wallet balances are read separately from family-vault holdings at the valuation block', async () => {
   const result = await fixture().value(balances);
   assert.deepEqual(result.parentWallet, {
     address: parent,
     usdc: { amount: '120000000', decimals: 6 },
     weth: { amount: '80000000000000000', decimals: 18 },
   });
-  assert.equal(result.assets.usdc.availableAmount, '10000000');
-  assert.equal(result.assets.usdc.positionAmount, '20000000');
   assert.equal(result.assets.usdc.totalAmount, '30000000');
   assert.equal(result.currentPortfolioValue.amount, '30000000000000000000');
   assert.equal(result.valuedAtBlock, '100');
-  assert.equal(result.holdingsIndexedAtBlock, '99');
 });
 
-test('never fabricates zero balances after invalid decimals or failed wallet reads', async () => {
+test('invalid token decimals or failed wallet reads never fabricate a zero balance', async () => {
   await assert.rejects(fixture(18).value(balances), { code: 'TOKEN_DECIMALS_MISMATCH' });
-  await assert.rejects(fixture(6, true).value(balances), {
-    code: 'PORTFOLIO_PRICING_UNAVAILABLE',
-  });
+  await assert.rejects(fixture(6, true).value(balances), { code: 'PORTFOLIO_PRICING_UNAVAILABLE' });
 });

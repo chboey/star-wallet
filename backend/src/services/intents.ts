@@ -24,12 +24,11 @@ import { protocolAddresses } from '../config.js';
 import { badRequest } from '../errors.js';
 import { AquaStrategyService, type AquaStrategyInput, type BuiltAquaStrategy } from './aqua.js';
 import { AquaConnector } from './aqua-connector.js';
+import type { ChildCredential } from './child-accounts.js';
 
 const erc20Abi = parseAbi(['function approve(address spender, uint256 amount) returns (bool)']);
 
 export type SignerRole = 'PARENT' | 'CHILD' | 'EMERGENCY_ADMIN';
-
-export type ChildCredential = { id: string; publicKey: Hex };
 
 export type TransactionIntent = {
   chainId: number;
