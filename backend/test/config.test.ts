@@ -48,3 +48,16 @@ test('blank overrides inherit configuration and unsafe network values fail close
     /DEPLOYMENT_FILE does not exist/,
   );
 });
+
+test('runtime hashes and deployed safety settings are validated with their protocol consumer', () => {
+  const settings = loadConfig({});
+  assert.match(settings.STAR_REGISTRY_RUNTIME_CODE_HASH ?? '', /^0x[0-9a-f]{64}$/);
+  assert.equal(settings.CHILD_ACCOUNT_RP_ID, 'star-frontend-mu.vercel.app');
+  assert.equal(settings.CHAINLINK_ETH_USD_MAX_AGE_SECONDS, 3_600);
+  assert.equal(settings.AQUA_MAX_POSITION_USDC_UNITS, 1_000_000_000n);
+  assert.throws(
+    () => loadConfig({ STAR_REGISTRY_RUNTIME_CODE_HASH: '0x1234' }),
+    /Invalid bytes32 value/,
+  );
+  assert.throws(() => loadConfig({ CHILD_ACCOUNT_RP_ID: 'https://example.com' }));
+});

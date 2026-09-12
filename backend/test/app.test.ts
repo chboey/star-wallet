@@ -11,7 +11,7 @@ const settings = loadConfig({
   SEPOLIA_RPC_URL: 'http://127.0.0.1:1',
 });
 
-test('exposes health, readiness and OpenAPI documentation without enabling signing', async (t) => {
+test('exposes health and OpenAPI documentation without enabling signing', async (t) => {
   const app = await buildApp(settings);
   t.after(() => app.close());
   const health = await app.inject('/health');
@@ -24,8 +24,16 @@ test('exposes health, readiness and OpenAPI documentation without enabling signi
     signingEnabled: false,
     databaseEnabled: false,
   });
-  assert.equal((await app.inject('/ready')).statusCode, 200);
   assert.equal((await app.inject('/docs/json')).statusCode, 200);
+});
+
+test('readiness fails safely when Sepolia protocol verification is unavailable', async (t) => {
+  const app = await buildApp(settings);
+  t.after(() => app.close());
+  const response = await app.inject('/ready');
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().code, 'PROTOCOL_UNAVAILABLE');
+  assert.doesNotMatch(response.body, /127\.0\.0\.1/);
 });
 
 test('preserves controlled errors and hides internal failure details', async (t) => {

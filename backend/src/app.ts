@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 import type { Config } from './config.js';
 import { loadConfig } from './config.js';
 import { HttpError } from './errors.js';
+import { ProtocolService } from './services/protocol.js';
 
 export async function buildApp(settings: Config = loadConfig()) {
   const app = Fastify({
@@ -29,6 +30,7 @@ export async function buildApp(settings: Config = loadConfig()) {
     },
   });
   await app.register(swaggerUi, { routePrefix: '/docs' });
+  const protocol = new ProtocolService(settings);
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof HttpError) {
@@ -89,9 +91,7 @@ export async function buildApp(settings: Config = loadConfig()) {
 
   app.get('/ready', async () => ({
     status: 'ready',
-    chainId: settings.CHAIN_ID,
-    rpcConfigured: Boolean(settings.SEPOLIA_RPC_URL),
-    contractsConfigured,
+    protocol: await protocol.ensureReady(),
   }));
 
   return app;

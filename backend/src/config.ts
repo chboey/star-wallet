@@ -13,6 +13,15 @@ const optionalAddress = z.preprocess(
     .optional(),
 );
 
+const optionalBytes32 = z.preprocess(
+  (value) => (value === '' || value === undefined ? undefined : value),
+  z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'Invalid bytes32 value')
+    .transform((value) => value.toLowerCase() as `0x${string}`)
+    .optional(),
+);
+
 const booleanString = z
   .enum(['true', 'false'])
   .default('false')
@@ -39,6 +48,26 @@ const schema = z.object({
   WETH_ADDRESS: optionalAddress.default(sepoliaDeployment.weth),
   AQUA_ADDRESS: optionalAddress,
   AQUA_SWAP_VM_ADDRESS: optionalAddress,
+  STAR_REGISTRY_RUNTIME_CODE_HASH: optionalBytes32,
+  STAR_TOKEN_RUNTIME_CODE_HASH: optionalBytes32,
+  STAR_GOALS_RUNTIME_CODE_HASH: optionalBytes32,
+  STAR_FAMILY_VAULT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
+  STAR_CHILD_ACCOUNT_FACTORY_RUNTIME_CODE_HASH: optionalBytes32,
+  AQUA_RUNTIME_CODE_HASH: optionalBytes32,
+  AQUA_SWAP_VM_RUNTIME_CODE_HASH: optionalBytes32,
+  CHILD_ACCOUNT_RP_ID: z
+    .string()
+    .max(253)
+    .regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/)
+    .default('localhost'),
+  CHAINLINK_ETH_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.ethUsdFeed),
+  CHAINLINK_USDC_USD_FEED_ADDRESS: optionalAddress.default(sepoliaDeployment.usdcUsdFeed),
+  CHAINLINK_ETH_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(3_600),
+  CHAINLINK_USDC_USD_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(90_000),
+  AQUA_MAX_PRICE_DEVIATION_BPS: z.coerce.number().int().min(25).max(2_500).default(1_000),
+  AQUA_MAX_STRATEGY_LIFETIME_SECONDS: z.coerce.number().int().min(120).max(86_400).default(1_800),
+  AQUA_MAX_POSITION_USDC_UNITS: z.coerce.bigint().positive().default(1_000_000_000n),
+  AQUA_MAX_POSITION_WETH_UNITS: z.coerce.bigint().positive().default(500_000_000_000_000_000n),
 });
 
 export type Config = z.infer<typeof schema>;
