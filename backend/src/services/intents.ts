@@ -22,6 +22,8 @@ import { normalize } from 'viem/ens';
 import type { Config, ProtocolAddresses } from '../config.js';
 import { protocolAddresses } from '../config.js';
 import { badRequest } from '../errors.js';
+import { AquaStrategyService, type AquaStrategyInput, type BuiltAquaStrategy } from './aqua.js';
+import { AquaConnector } from './aqua-connector.js';
 
 const erc20Abi = parseAbi(['function approve(address spender, uint256 amount) returns (bool)']);
 
@@ -40,9 +42,11 @@ export type TransactionIntent = {
 
 export class IntentService {
   private readonly addresses: ProtocolAddresses;
+  private readonly aqua: AquaStrategyService;
 
   constructor(private readonly settings: Config) {
     this.addresses = protocolAddresses(settings);
+    this.aqua = new AquaStrategyService(settings);
   }
 
   createFamily(ensName: string) {
@@ -379,6 +383,153 @@ export class IntentService {
         ),
       ],
     };
+  }
+
+  async shipSavings(input: {
+    familyId: bigint;
+    vault: Address;
+    usdcAmount: bigint;
+    wethAmount: bigint;
+    feeBps: number;
+    priceBandBps: number;
+    validForSeconds: number;
+  }) {
+    const built = await this.buildAquaStrategy({
+      maker: input.vault,
+      feeBps: input.feeBps,
+      priceBandBps: input.priceBandBps,
+      validForSeconds: input.validForSeconds,
+    });
+    return {
+      ...built,
+      maker: input.vault,
+      app: this.addresses.swapVm,
+      intents: [
+        this.intent(
+          'PARENT',
+          input.vault,
+          familyVaultAbi,
+          'shipSavingsPosition',
+          [built.strategy, input.usdcAmount, input.wethAmount],
+          `Ship the family vault's ${built.strategyType} Aqua/SwapVM savings position`,
+        ),
+      ],
+    };
+  }
+
+  async replaceSavings(input: {
+    familyId: bigint;
+    vault: Address;
+    usdcAmount: bigint;
+    wethAmount: bigint;
+    feeBps: number;
+    priceBandBps: number;
+    validForSeconds: number;
+  }) {
+    const built = await this.buildAquaStrategy({
+      maker: input.vault,
+      feeBps: input.feeBps,
+      priceBandBps: input.priceBandBps,
+      validForSeconds: input.validForSeconds,
+    });
+    return {
+      ...built,
+      maker: input.vault,
+      app: this.addresses.swapVm,
+      atomicPositionReplacement: true,
+      intents: [
+        this.intent(
+          'PARENT',
+          input.vault,
+          familyVaultAbi,
+          'replaceSavingsPosition',
+          [built.strategy, input.usdcAmount, input.wethAmount],
+          `Atomically replace family ${input.familyId.toString()}'s Aqua/SwapVM savings position`,
+        ),
+      ],
+    };
+  }
+
+  dockSavings(familyId: bigint, vault: Address) {
+    return {
+      intents: [
+        this.intent(
+          'PARENT',
+          vault,
+          familyVaultAbi,
+          'dockSavingsPosition',
+          [],
+          `Dock family ${familyId.toString()}'s active Aqua position`,
+        ),
+      ],
+    };
+  }
+
+  addSavings(input: {
+    familyId: bigint;
+    vault: Address;
+    expectedStrategyHash: Hex;
+    usdcAmount: bigint;
+    wethAmount: bigint;
+  }) {
+    return {
+      intents: [
+        this.intent(
+          'PARENT',
+          input.vault,
+          familyVaultAbi,
+          'addToSavingsPosition',
+          [input.expectedStrategyHash, input.usdcAmount, input.wethAmount],
+          `Add available vault funds to family ${input.familyId.toString()}'s existing Aqua position`,
+        ),
+      ],
+    };
+  }
+
+  setAquaPaused(familyId: bigint, vault: Address, paused: boolean, positionActive: boolean) {
+    if (!paused && positionActive) {
+      throw badRequest(
+        'AQUA_POSITION_STILL_ACTIVE',
+        'Dock the active Aqua position before resuming token allowances',
+      );
+    }
+    const pauseIntent = this.intent(
+      'EMERGENCY_ADMIN',
+      vault,
+      familyVaultAbi,
+      'setAquaPaused',
+      [paused],
+      `${paused ? 'Pause Aqua and revoke both token allowances for' : 'Resume Aqua for'} family ${familyId.toString()}'s vault`,
+    );
+    const emergencyDockIntent =
+      paused && positionActive
+        ? this.intent(
+            'EMERGENCY_ADMIN',
+            vault,
+            familyVaultAbi,
+            'emergencyDockSavingsPosition',
+            [],
+            `Dock family ${familyId.toString()}'s active position after Aqua is paused`,
+          )
+        : undefined;
+    return {
+      emergencyAction: true,
+      requiresSequentialConfirmation: emergencyDockIntent !== undefined,
+      intents: emergencyDockIntent ? [pauseIntent, emergencyDockIntent] : [pauseIntent],
+    };
+  }
+
+  private async buildAquaStrategy(input: AquaStrategyInput): Promise<BuiltAquaStrategy> {
+    try {
+      // Validate the router target before returning signable ship/replace intents.
+      new AquaConnector(this.addresses);
+      return await this.aqua.build(input);
+    } catch (error) {
+      throw badRequest(
+        'INVALID_AQUA_STRATEGY',
+        error instanceof Error ? error.message : 'The Aqua strategy parameters are invalid',
+      );
+    }
   }
 
   private intent<

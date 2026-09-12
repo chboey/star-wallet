@@ -17,6 +17,7 @@ import {
   type Hex,
 } from 'viem';
 import { loadConfig, protocolAddresses } from '../src/config.js';
+import type { AquaStrategyInput, BuiltAquaStrategy } from '../src/services/aqua.js';
 import { IntentService } from '../src/services/intents.js';
 
 const settings = loadConfig({ SEPOLIA_RPC_URL: 'http://127.0.0.1:8545' });
@@ -27,6 +28,41 @@ const parent = '0x0000000000000000000000000000000000002001';
 const publicKey = `0x${'11'.repeat(32)}${'22'.repeat(32)}` as Hex;
 const vault = '0x0000000000000000000000000000000000003001';
 const erc20Abi = parseAbi(['function approve(address spender, uint256 amount) returns (bool)']);
+const strategy = '0x1234' as Hex;
+const strategyHash = `0x${'34'.repeat(32)}` as Hex;
+const builtStrategy: BuiltAquaStrategy = {
+  strategy,
+  strategyHash,
+  strategyType: 'XYC_CONCENTRATED',
+  salt: '1',
+  deadline: '1000900',
+  priceBandBps: 500,
+  oracleRawPrice: '500000000000000000000000000',
+  rawPriceMin: '475000000000000000000000000',
+  rawPriceMax: '525000000000000000000000000',
+  oracleBlockNumber: '100',
+  oracleBlockTimestamp: '1000000',
+  oracleFeeds: {
+    ethUsd: {
+      address: settings.CHAINLINK_ETH_USD_FEED_ADDRESS!,
+      description: 'ETH / USD',
+      decimals: 8,
+      roundId: '1',
+      answeredInRound: '1',
+      startedAt: '999900',
+      updatedAt: '999990',
+    },
+    usdcUsd: {
+      address: settings.CHAINLINK_USDC_USD_FEED_ADDRESS!,
+      description: 'USDC / USD',
+      decimals: 8,
+      roundId: '1',
+      answeredInRound: '1',
+      startedAt: '999900',
+      updatedAt: '999990',
+    },
+  },
+};
 
 test('prepares parent-signed family registration with a normalized ENS node', () => {
   const prepared = service.createFamily('family.starwallet.eth');
@@ -314,3 +350,118 @@ test('prepares WETH approval and funding followed by independent withdrawals', (
     args: [1_000_000n, recipient],
   });
 });
+
+test('prepares canonical ship and atomic replacement calls for the resolved family vault', async () => {
+  const aquaService = serviceWithStrategy();
+  const input = {
+    familyId: 42n,
+    vault,
+    usdcAmount: 80_000_000n,
+    wethAmount: 2_000_000_000_000_000n,
+    feeBps: 30,
+    priceBandBps: 500,
+    validForSeconds: 900,
+  } as const;
+  const shipped = await aquaService.shipSavings(input);
+  const replaced = await aquaService.replaceSavings(input);
+
+  assert.equal(shipped.maker, vault);
+  assert.equal(shipped.app, addresses.swapVm);
+  assert.equal(shipped.strategyHash, strategyHash);
+  assert.equal(shipped.intents[0]?.to, vault);
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: shipped.intents[0]!.data }), {
+    functionName: 'shipSavingsPosition',
+    args: [strategy, 80_000_000n, 2_000_000_000_000_000n],
+  });
+  assert.equal(replaced.maker, vault);
+  assert.equal(replaced.atomicPositionReplacement, true);
+  assert.equal(replaced.intents[0]?.to, vault);
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: replaced.intents[0]!.data }), {
+    functionName: 'replaceSavingsPosition',
+    args: [strategy, 80_000_000n, 2_000_000_000_000_000n],
+  });
+});
+
+test('prepares dock and position-identity-checked top-up calls against the resolved vault', () => {
+  const docked = service.dockSavings(42n, vault);
+  const toppedUp = service.addSavings({
+    familyId: 42n,
+    vault,
+    expectedStrategyHash: strategyHash,
+    usdcAmount: 5_000_000n,
+    wethAmount: 0n,
+  });
+
+  assert.equal(docked.intents[0]?.to, vault);
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: docked.intents[0]!.data }), {
+    functionName: 'dockSavingsPosition',
+    args: undefined,
+  });
+  assert.equal(toppedUp.intents[0]?.to, vault);
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: toppedUp.intents[0]!.data }), {
+    functionName: 'addToSavingsPosition',
+    args: [strategyHash, 5_000_000n, 0n],
+  });
+});
+
+test('prepares sequential emergency pause and docking while guarding resume', () => {
+  const paused = service.setAquaPaused(42n, vault, true, true);
+  const resumed = service.setAquaPaused(42n, vault, false, false);
+
+  assert.equal(paused.emergencyAction, true);
+  assert.equal(paused.requiresSequentialConfirmation, true);
+  assert.equal(paused.intents.length, 2);
+  assert.ok(paused.intents.every((intent) => intent.to === vault));
+  assert.ok(paused.intents.every((intent) => intent.signerRole === 'EMERGENCY_ADMIN'));
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: paused.intents[0]!.data }), {
+    functionName: 'setAquaPaused',
+    args: [true],
+  });
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: paused.intents[1]!.data }), {
+    functionName: 'emergencyDockSavingsPosition',
+    args: undefined,
+  });
+  assert.equal(resumed.requiresSequentialConfirmation, false);
+  assert.deepEqual(decodeFunctionData({ abi: familyVaultAbi, data: resumed.intents[0]!.data }), {
+    functionName: 'setAquaPaused',
+    args: [false],
+  });
+  assert.throws(
+    () => service.setAquaPaused(42n, vault, false, true),
+    /Dock the active Aqua position before resuming token allowances/,
+  );
+});
+
+test('fails closed when canonical Aqua strategy validation fails', async () => {
+  const aquaService = serviceWithStrategy(async () => {
+    throw new Error('unsafe strategy');
+  });
+
+  await assert.rejects(
+    aquaService.shipSavings({
+      familyId: 42n,
+      vault,
+      usdcAmount: 1n,
+      wethAmount: 1n,
+      feeBps: 30,
+      priceBandBps: 500,
+      validForSeconds: 900,
+    }),
+    (error: unknown) =>
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'INVALID_AQUA_STRATEGY',
+  );
+});
+
+function serviceWithStrategy(
+  build: (input: AquaStrategyInput) => Promise<BuiltAquaStrategy> = async (input) => {
+    assert.equal(input.maker, vault);
+    return builtStrategy;
+  },
+) {
+  const aquaService = new IntentService(settings);
+  Object.assign(aquaService, { aqua: { build } });
+  return aquaService;
+}
