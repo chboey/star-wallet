@@ -15,6 +15,8 @@ test('the incremental environment example parses without future service settings
   assert.equal(settings.CHAIN_ID, 11155111);
   assert.equal(settings.STAR_REGISTRY_ADDRESS, undefined);
   assert.equal(settings.AQUA_ADDRESS, undefined);
+  assert.equal(settings.STAR_SUBGRAPH_URL, undefined);
+  assert.equal(settings.STAR_SUBGRAPH_MAX_BLOCK_LAG, 20);
   assert.throws(() => protocolAddresses(settings), /STAR_REGISTRY_ADDRESS.*AQUA_SWAP_VM_ADDRESS/);
 });
 

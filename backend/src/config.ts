@@ -13,6 +13,11 @@ const optionalAddress = z.preprocess(
     .optional(),
 );
 
+const optionalUrl = z.preprocess(
+  (value) => (value === '' || value === undefined ? undefined : value),
+  z.string().url().optional(),
+);
+
 const optionalBytes32 = z.preprocess(
   (value) => (value === '' || value === undefined ? undefined : value),
   z
@@ -40,6 +45,9 @@ const schema = z
       .default(11155111),
     SEPOLIA_RPC_URL: z.string().url().default(sepoliaDeployment.rpcUrl),
     DEPLOYMENT_FILE: z.string().optional(),
+    STAR_SUBGRAPH_URL: optionalUrl,
+    STAR_SUBGRAPH_DEPLOYMENT_ID: z.string().trim().min(1).optional(),
+    STAR_SUBGRAPH_MAX_BLOCK_LAG: z.coerce.number().int().min(1).max(10_000).default(20),
     STAR_REGISTRY_ADDRESS: optionalAddress,
     STAR_TOKEN_ADDRESS: optionalAddress,
     STAR_GOALS_ADDRESS: optionalAddress,
