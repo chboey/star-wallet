@@ -226,3 +226,45 @@ test('prepares parent-signed goal creation and cancellation', () => {
     args: [9n],
   });
 });
+
+test('prepares child-signed goal contributions and redemption requests', () => {
+  const contribution = service.addStarsToGoal(9n, 4n, childWallet);
+  const redemption = service.requestRedemption(9n, childWallet);
+
+  assert.equal(contribution.intents[0]?.to, childWallet);
+  assert.equal(contribution.intents[0]?.signerRole, 'CHILD');
+  assert.deepEqual(
+    decodeFunctionData({ abi: childAccountAbi, data: contribution.intents[0]!.data }),
+    { functionName: 'addStarsToGoal', args: [9n, 4n] },
+  );
+  assert.equal(redemption.intents[0]?.to, childWallet);
+  assert.equal(redemption.intents[0]?.signerRole, 'CHILD');
+  assert.deepEqual(
+    decodeFunctionData({ abi: childAccountAbi, data: redemption.intents[0]!.data }),
+    { functionName: 'requestRedemption', args: [9n] },
+  );
+});
+
+test('prepares child cancellation and parent approval or rejection of redemptions', () => {
+  const cancellation = service.cancelRedemption(12n, childWallet);
+  const approval = service.resolveRedemption(12n, true);
+  const rejection = service.resolveRedemption(12n, false);
+
+  assert.equal(cancellation.intents[0]?.to, childWallet);
+  assert.equal(cancellation.intents[0]?.signerRole, 'CHILD');
+  assert.deepEqual(
+    decodeFunctionData({ abi: childAccountAbi, data: cancellation.intents[0]!.data }),
+    { functionName: 'cancelRedemption', args: [12n] },
+  );
+  assert.equal(approval.burnsReservedStars, true);
+  assert.equal(approval.withdrawsSavings, false);
+  assert.deepEqual(decodeFunctionData({ abi: starGoalsAbi, data: approval.intents[0]!.data }), {
+    functionName: 'approveRedemption',
+    args: [12n],
+  });
+  assert.equal(rejection.burnsReservedStars, false);
+  assert.deepEqual(decodeFunctionData({ abi: starGoalsAbi, data: rejection.intents[0]!.data }), {
+    functionName: 'rejectRedemption',
+    args: [12n],
+  });
+});

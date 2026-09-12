@@ -260,6 +260,68 @@ export class IntentService {
     };
   }
 
+  requestRedemption(goalId: bigint, childWallet: Address) {
+    return {
+      intents: [
+        this.intent(
+          'CHILD',
+          childWallet,
+          childAccountAbi,
+          'requestRedemption',
+          [goalId],
+          `Request redemption of goal ${goalId.toString()}`,
+        ),
+      ],
+    };
+  }
+
+  addStarsToGoal(goalId: bigint, amount: bigint, childWallet: Address) {
+    return {
+      intents: [
+        this.intent(
+          'CHILD',
+          childWallet,
+          childAccountAbi,
+          'addStarsToGoal',
+          [goalId, amount],
+          `Add ${amount.toString()} Stars to goal ${goalId.toString()}`,
+        ),
+      ],
+    };
+  }
+
+  cancelRedemption(redemptionId: bigint, childWallet: Address) {
+    return {
+      intents: [
+        this.intent(
+          'CHILD',
+          childWallet,
+          childAccountAbi,
+          'cancelRedemption',
+          [redemptionId],
+          `Cancel redemption request ${redemptionId.toString()}`,
+        ),
+      ],
+    };
+  }
+
+  resolveRedemption(redemptionId: bigint, approve: boolean) {
+    return {
+      burnsReservedStars: approve,
+      withdrawsSavings: false,
+      intents: [
+        this.intent(
+          'PARENT',
+          this.addresses.goals,
+          starGoalsAbi,
+          approve ? 'approveRedemption' : 'rejectRedemption',
+          [redemptionId],
+          `${approve ? 'Approve' : 'Reject'} redemption request ${redemptionId.toString()}`,
+        ),
+      ],
+    };
+  }
+
   private intent<
     const TAbi extends Abi,
     TFunctionName extends ContractFunctionName<TAbi, 'nonpayable' | 'payable'>,
