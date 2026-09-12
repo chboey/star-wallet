@@ -465,3 +465,102 @@ test('rejects a changed parent-inbox snapshot instead of losing pending actions'
     /different pagination snapshot/,
   );
 });
+
+test('paginates family activity with a deterministic sequence cursor', async () => {
+  let requestBody: { query: string; variables: Record<string, unknown> } | undefined;
+  mock.method(
+    globalThis,
+    'fetch',
+    async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body)) as typeof requestBody;
+      return Response.json({
+        data: {
+          protocolActivities: [
+            { id: '0x02', sequence: '200' },
+            { id: '0x01', sequence: '150' },
+          ],
+          _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+        },
+      });
+    },
+  );
+
+  const result = await new GraphService(settings, rpc).familyActivities('7', 2, '250');
+
+  assert.deepEqual(requestBody?.variables, { familyId: '7', first: 2, before: '250' });
+  assert.match(requestBody?.query ?? '', /sequence_lt: \$before/);
+  assert.match(requestBody?.query ?? '', /\$familyId: String!/);
+  assert.equal(result.nextCursor, '150');
+  assert.equal(result.indexing.blockLag, 5);
+});
+
+test('queries indexed protocol pause state with verified metadata', async () => {
+  let query = '';
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    query = (JSON.parse(String(init?.body)) as { query: string }).query;
+    return Response.json({
+      data: {
+        protocolState: {
+          id: 'protocol',
+          vaultCount: '3',
+          pausedVaultCount: '1',
+          hasPausedVaults: true,
+        },
+        _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+      },
+    });
+  });
+
+  const result = await new GraphService(settings, rpc).protocolState();
+
+  assert.match(query, /pausedVaultCount hasPausedVaults emergencyAdmin/);
+  assert.equal(result?.vaultCount, '3');
+  assert.equal(result?.hasPausedVaults, true);
+  assert.deepEqual((result?.indexing as { blockLag: number }).blockLag, 5);
+});
+
+test('validates indexed vault accounting without fabricating missing balances', async () => {
+  const savings = {
+    availableUsdc: '120000000',
+    availableWeth: '0',
+    activePosition: null,
+  };
+  const reply = (value: unknown) =>
+    Response.json({
+      data: {
+        family: {
+          id: '1',
+          parent: '0x0000000000000000000000000000000000001234',
+          savings: value,
+        },
+        _meta: {
+          deployment,
+          block: { number: 995, hash: rpcHash, timestamp: null },
+          hasIndexingErrors: false,
+        },
+      },
+    });
+  mock.method(globalThis, 'fetch', async () => reply(savings));
+
+  const result = await new GraphService(settings, rpc).portfolioBalances('1');
+
+  assert.equal(result?.availableUsdc, 120_000_000n);
+  assert.equal(result?.availableWeth, 0n);
+  assert.equal(result?.positionUsdc, 0n);
+  assert.equal(result?.indexedTimestamp, undefined);
+  mock.restoreAll();
+
+  for (const value of [null, '', '  ', '0x10', '-1', 0, false]) {
+    mock.method(globalThis, 'fetch', async () => reply({ ...savings, availableUsdc: value }));
+    await assert.rejects(new GraphService(settings, rpc).portfolioBalances('1'), {
+      code: 'SUBGRAPH_INVALID_BALANCE',
+    });
+    mock.restoreAll();
+  }
+  mock.method(globalThis, 'fetch', async () =>
+    reply({ ...savings, activePosition: { currentUsdcAmount: null, currentWethAmount: '0' } }),
+  );
+  await assert.rejects(new GraphService(settings, rpc).portfolioBalances('1'), {
+    code: 'SUBGRAPH_INVALID_BALANCE',
+  });
+});

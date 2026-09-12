@@ -1,6 +1,6 @@
 import type { Config } from '../config.js';
 import { HttpError, unavailable } from '../errors.js';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, getAddress, isAddress, zeroAddress, type Address } from 'viem';
 import { sepolia } from 'viem/chains';
 
 const familyQuery = `
@@ -79,6 +79,21 @@ const familiesByParentQuery = `
   }
 `;
 
+const familyActivitiesQuery = `
+  query FamilyActivities($familyId: String!, $first: Int!, $before: BigInt!) {
+    protocolActivities(
+      first: $first
+      orderBy: sequence
+      orderDirection: desc
+      where: { family: $familyId, sequence_lt: $before }
+    ) {
+      id type amount active transactionHash logIndex sequence blockNumber timestamp
+      child { id } registration { id registrationId } goal { id } redemption { id }
+    }
+    _meta { deployment block { number hash timestamp } hasIndexingErrors }
+  }
+`;
+
 const childQuery = `
   query ChildByWallet($wallet: ID!, $first: Int!, $skip: Int!, $block: Block_height) {
     childWallet(id: $wallet, block: $block) {
@@ -117,6 +132,15 @@ const inboxQuery = `
     _meta(block: $block) { deployment block { number hash timestamp } hasIndexingErrors }
   }
 `;
+const protocolStateQuery = `
+  query ProtocolState {
+    protocolState(id: "protocol") {
+      id factory vaultCount pausedVaultCount hasPausedVaults emergencyAdmin updatedAt
+      updatedTransactionHash
+    }
+    _meta { deployment block { number hash timestamp } hasIndexingErrors }
+  }
+`;
 const goalRequestsQuery = `
   query GoalRequests($family: String!, $first: Int!, $skip: Int!, $block: Block_height) {
     goalRequests(where: { family: $family }, first: $first, skip: $skip, block: $block, orderBy: requestId, orderDirection: desc) {
@@ -125,6 +149,19 @@ const goalRequestsQuery = `
       child { id wallet ensName } goal { id title starCost status }
     }
     _meta(block: $block) { deployment block { number hash timestamp } hasIndexingErrors }
+  }
+`;
+const portfolioBalancesQuery = `
+  query PortfolioBalances($id: ID!) {
+    family(id: $id) {
+      id parent
+      savings {
+        availableUsdc
+        availableWeth
+        activePosition { currentUsdcAmount currentWethAmount }
+      }
+    }
+    _meta { deployment block { number hash timestamp } hasIndexingErrors }
   }
 `;
 
@@ -137,6 +174,22 @@ type IndexingStatus = {
   currentBlock?: number;
   blockLag?: number;
   maximumBlockLag?: number;
+};
+export type PortfolioBalances = {
+  familyId: string;
+  parent: Address;
+  availableUsdc: bigint;
+  availableWeth: bigint;
+  positionUsdc: bigint;
+  positionWeth: bigint;
+  indexedBlock: bigint;
+  indexedTimestamp?: bigint;
+};
+
+export type IndexedPage = {
+  items: Array<Record<string, unknown>>;
+  nextCursor: string | null;
+  indexing: IndexingStatus;
 };
 
 type SepoliaHeadReader = {
@@ -253,6 +306,20 @@ export class GraphService {
     };
   }
 
+  async familyActivities(id: string, first: number, before: string): Promise<IndexedPage> {
+    const data = await this.query<{
+      protocolActivities: Array<Record<string, unknown> & { sequence: string }>;
+      _meta: IndexingStatus;
+    }>(familyActivitiesQuery, { familyId: id, first, before });
+    const indexing = await this.requireFreshIndex(data._meta);
+    const last = data.protocolActivities.at(-1);
+    return {
+      items: data.protocolActivities,
+      nextCursor: data.protocolActivities.length === first && last ? last.sequence : null,
+      indexing,
+    };
+  }
+
   async childByWallet(
     wallet: string,
     pagination: SnapshotPagination,
@@ -280,6 +347,64 @@ export class GraphService {
   async indexingStatus(): Promise<IndexingStatus> {
     const data = await this.query<{ _meta: IndexingStatus }>(indexingQuery, {});
     return this.requireFreshIndex(data._meta);
+  }
+
+  async protocolState(): Promise<Record<string, unknown> | null> {
+    const data = await this.query<{
+      protocolState: Record<string, unknown> | null;
+      _meta: IndexingStatus;
+    }>(protocolStateQuery, {});
+    const indexing = await this.requireFreshIndex(data._meta);
+    return data.protocolState === null ? null : { ...data.protocolState, indexing };
+  }
+
+  async portfolioBalances(id: string): Promise<PortfolioBalances | null> {
+    const data = await this.query<{
+      family: {
+        id: string;
+        parent: string;
+        savings: {
+          availableUsdc: string;
+          availableWeth: string;
+          activePosition: {
+            currentUsdcAmount: string;
+            currentWethAmount: string;
+          } | null;
+        };
+      } | null;
+      _meta: IndexingStatus;
+    }>(portfolioBalancesQuery, { id });
+    const indexing = await this.requireFreshIndex(data._meta);
+    if (data.family === null) return null;
+    if (
+      !data.family?.savings ||
+      data.family.id !== id ||
+      !isAddress(data.family.parent ?? '') ||
+      data.family.parent === zeroAddress
+    ) {
+      throw unavailable(
+        'SUBGRAPH_INVALID_RESPONSE',
+        'The Subgraph returned invalid family savings',
+      );
+    }
+    const position = data.family.savings.activePosition;
+    return {
+      familyId: data.family.id,
+      parent: getAddress(data.family.parent),
+      availableUsdc: asUnsignedBigInt(data.family.savings.availableUsdc, 'availableUsdc'),
+      availableWeth: asUnsignedBigInt(data.family.savings.availableWeth, 'availableWeth'),
+      positionUsdc: asUnsignedBigInt(
+        position === null ? '0' : position?.currentUsdcAmount,
+        'positionUsdc',
+      ),
+      positionWeth: asUnsignedBigInt(
+        position === null ? '0' : position?.currentWethAmount,
+        'positionWeth',
+      ),
+      indexedBlock: BigInt(indexing.block.number),
+      indexedTimestamp:
+        indexing.block.timestamp == null ? undefined : BigInt(indexing.block.timestamp),
+    };
   }
 
   private async requireFreshIndex(meta: IndexingStatus): Promise<IndexingStatus> {
@@ -495,4 +620,16 @@ function hasFullPage(value: unknown, first: number): boolean {
     typeof value === 'object' &&
     Object.values(value).some((item) => hasFullPage(item, first))
   );
+}
+
+function asUnsignedBigInt(value: unknown, field: string): bigint {
+  try {
+    if (typeof value !== 'string' || !/^[0-9]+$/.test(value))
+      throw new Error('not a decimal string');
+    const parsed = BigInt(value);
+    if (parsed < 0n) throw new Error('negative');
+    return parsed;
+  } catch {
+    throw unavailable('SUBGRAPH_INVALID_BALANCE', `The Subgraph returned an invalid ${field}`);
+  }
 }
