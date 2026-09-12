@@ -41,6 +41,14 @@ test('validates managed namespace boundaries and signer addresses before RPC', a
   ]) {
     assert.throws(() => ens.requireManagedName(name));
   }
+  await assert.rejects(
+    ens.prepareSubdomain({ label: 'has.dots', signer, owner: signer, address: signer }),
+    { code: 'INVALID_ENS_LABEL' },
+  );
+  await assert.rejects(
+    ens.prepareSubdomain({ label: 'maya', signer, owner: zeroAddress, address: signer }),
+    { code: 'INVALID_ENS_ADDRESS' },
+  );
   await assert.rejects(ens.prepareNamespace(zeroAddress), { code: 'INVALID_ENS_ADDRESS' });
 });
 

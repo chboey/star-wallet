@@ -27,6 +27,7 @@ import {
   ensResolverAbi,
   type EnsPlan,
   type EnsFamilyPlan,
+  type RegisterSubdomainInput,
 } from './ens-v2.js';
 
 type Snapshot = { number: bigint; timestamp: bigint };
@@ -349,6 +350,142 @@ export class EnsService {
         );
     }
     return address;
+  }
+
+  async prepareSubdomain(input: RegisterSubdomainInput): Promise<EnsPlan> {
+    const parentName = this.requireManagedName(input.parentName ?? this.parentName, true);
+    const label = normalizedName(input.label);
+    if (label.includes('.'))
+      throw badRequest('INVALID_ENS_LABEL', 'Provide one label, without dots');
+    const name = normalizedName(`${label}.${parentName}`);
+    const signer = nonzero(input.signer);
+    const owner = nonzero(input.owner);
+    const target = nonzero(input.address);
+    return this.withSnapshot(async (block) => {
+      const parent = await this.readNamespace(parentName, block);
+      const expiry = input.expiresAt ?? parent.expiresAt;
+      if (expiry <= block.timestamp + 60n || expiry > parent.expiresAt || expiry >= 1n << 64n)
+        throw badRequest(
+          'INVALID_ENS_EXPIRY',
+          'Expiry must be more than 60 seconds ahead and cannot exceed any ancestor expiry',
+        );
+      if (same(parent.subregistry, zeroAddress)) return this.setup(parent, signer, block);
+      await this.verifyRegistry(parent.subregistry, parent, block);
+      const permitted = await this.client.readContract({
+        address: parent.subregistry,
+        abi: ensRegistryAbi,
+        functionName: 'hasRootRoles',
+        args: [ENS_REGISTRAR_ROLE, signer],
+        blockNumber: block.number,
+      });
+      if (!permitted)
+        throw new HttpError(
+          403,
+          'ENS_REGISTRAR_REQUIRED',
+          'This signer cannot register names in this namespace',
+        );
+      const tokenId = await this.client.readContract({
+        address: parent.subregistry,
+        abi: ensRegistryAbi,
+        functionName: 'findTokenId',
+        args: [label],
+        blockNumber: block.number,
+      });
+      const state = await this.client.readContract({
+        address: parent.subregistry,
+        abi: ensRegistryAbi,
+        functionName: 'getState',
+        args: [tokenId],
+        blockNumber: block.number,
+      });
+      const salt = this.salt(
+        'star-ens-resolver-v2',
+        name,
+        parent.subregistry,
+        parent.tokenId,
+        owner,
+        target,
+        expiry,
+      );
+      const proxy = await this.proxy(signer, salt, block);
+      if (state.status !== 0) {
+        const resolver = await this.client.readContract({
+          address: parent.subregistry,
+          abi: ensRegistryAbi,
+          functionName: 'getResolver',
+          args: [label],
+          blockNumber: block.number,
+        });
+        // Idempotent only for an exact completed request. Never overwrite a name.
+        if (
+          state.status !== 2 ||
+          !same(state.latestOwner, owner) ||
+          !same(resolver, proxy) ||
+          state.expiry !== expiry
+        )
+          throw new HttpError(
+            409,
+            'ENS_NAME_UNAVAILABLE',
+            'This name is reserved or already registered with different settings',
+          );
+        await this.verifyResolver(proxy, owner, name, target, block);
+        const resolved = await this.client.getEnsAddress({
+          name,
+          universalResolverAddress: deployment.ensUniversalResolver,
+          blockNumber: block.number,
+        });
+        if (!resolved || !same(resolved, target))
+          throw unavailable(
+            'ENS_RESOLUTION_MISMATCH',
+            'The registered name does not resolve to the requested address',
+          );
+        return this.ready(name, block);
+      }
+      const registration = encodeFunctionData({
+        abi: ensRegistryAbi,
+        functionName: 'register',
+        args: [label, owner, zeroAddress, proxy, ENS_OWNER_ROLES, expiry],
+      });
+      if (!(await this.hasCode(proxy, block))) {
+        // The registry stores the resolver address without calling it. Check the
+        // eventual registration (including ERC-1155 receipt) before funding a proxy.
+        await this.client.call({
+          account: signer,
+          to: parent.subregistry,
+          data: registration,
+          value: 0n,
+          blockNumber: block.number,
+        });
+        const setter = encodeFunctionData({
+          abi: ensResolverAbi,
+          functionName: 'setAddr',
+          args: [namehash(name), target],
+        });
+        const data = encodeFunctionData({
+          abi: ensResolverAbi,
+          functionName: 'initialize',
+          args: [owner, ENS_OWNER_ROLES, [setter]],
+        });
+        return this.deploy(
+          'DEPLOY_RESOLVER',
+          name,
+          signer,
+          deployment.ensPermissionedResolverImplementation,
+          salt,
+          data,
+          block,
+        );
+      }
+      await this.verifyResolver(proxy, owner, name, target, block);
+      return this.transaction(
+        'REGISTER_SUBDOMAIN',
+        name,
+        signer,
+        parent.subregistry,
+        registration,
+        block,
+      );
+    });
   }
 
   private async setup(parent: Namespace, signer: Address, block: Snapshot): Promise<EnsPlan> {
