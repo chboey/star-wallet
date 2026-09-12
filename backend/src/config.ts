@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getAddress, isAddress, type Address } from 'viem';
+import { normalize } from 'viem/ens';
 import { z } from 'zod';
 import { sepoliaDeployment } from '@star/contracts/network';
 
@@ -27,6 +28,22 @@ const optionalBytes32 = z.preprocess(
     .optional(),
 );
 
+const ensName = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => {
+      try {
+        normalize(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Invalid ENS name' },
+  )
+  .transform((value) => normalize(value));
+
 const booleanString = z
   .enum(['true', 'false'])
   .default('false')
@@ -44,6 +61,19 @@ const schema = z
       .refine((value) => value === 11155111, 'CHAIN_ID must be Ethereum Sepolia 11155111')
       .default(11155111),
     SEPOLIA_RPC_URL: z.string().url().default(sepoliaDeployment.rpcUrl),
+    ENS_ROOT_REGISTRY_ADDRESS: optionalAddress.default(sepoliaDeployment.ensRootRegistry),
+    ENS_ETH_REGISTRY_ADDRESS: optionalAddress.default(sepoliaDeployment.ensEthRegistry),
+    ENS_UNIVERSAL_RESOLVER_ADDRESS: optionalAddress.default(sepoliaDeployment.ensUniversalResolver),
+    ENS_VERIFIABLE_FACTORY_ADDRESS: optionalAddress.default(sepoliaDeployment.ensVerifiableFactory),
+    ENS_USER_REGISTRY_IMPLEMENTATION_ADDRESS: optionalAddress.default(
+      sepoliaDeployment.ensUserRegistryImplementation,
+    ),
+    ENS_PERMISSIONED_RESOLVER_IMPLEMENTATION_ADDRESS: optionalAddress.default(
+      sepoliaDeployment.ensPermissionedResolverImplementation,
+    ),
+    ENS_PARENT_NAME: ensName.default('starwallet.eth'),
+    STAR_ENS_REGISTRAR_ADDRESS: optionalAddress,
+    STAR_ENS_REGISTRAR_RUNTIME_CODE_HASH: optionalBytes32,
     DEPLOYMENT_FILE: z.string().optional(),
     STAR_SUBGRAPH_URL: optionalUrl,
     STAR_SUBGRAPH_DEPLOYMENT_ID: z.string().trim().min(1).optional(),
@@ -105,6 +135,15 @@ const schema = z
 export type Config = z.infer<typeof schema>;
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Config {
+  for (const name of [
+    'ENS_REGISTRY_ADDRESS',
+    'ENS_NAME_WRAPPER_ADDRESS',
+    'ENS_PUBLIC_RESOLVER_ADDRESS',
+    'ENS_PARENT_WRAPPED',
+  ]) {
+    if (environment[name]?.trim())
+      throw new Error(`${name} is an obsolete ENSv1 setting; use the Sepolia ENSv2 example`);
+  }
   return schema.parse(withDeploymentConfiguration(environment));
 }
 

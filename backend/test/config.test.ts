@@ -17,6 +17,8 @@ test('the incremental environment example parses without future service settings
   assert.equal(settings.AQUA_ADDRESS, undefined);
   assert.equal(settings.STAR_SUBGRAPH_URL, undefined);
   assert.equal(settings.STAR_SUBGRAPH_MAX_BLOCK_LAG, 20);
+  assert.equal(settings.ENS_PARENT_NAME, 'starwallet.eth');
+  assert.equal(settings.ENS_ROOT_REGISTRY_ADDRESS, '0x8115186E8f2E0B0281e86ab91f0f48Ba90364354');
   assert.throws(() => protocolAddresses(settings), /STAR_REGISTRY_ADDRESS.*AQUA_SWAP_VM_ADDRESS/);
 });
 
