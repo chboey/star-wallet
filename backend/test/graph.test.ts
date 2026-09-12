@@ -338,3 +338,130 @@ test('paginates family and child snapshots at the requested block hash', async (
     code: 'SUBGRAPH_INVALID_RESPONSE',
   });
 });
+
+test('keeps goal requests family-scoped and paginates at a pinned block', async () => {
+  let variables: Record<string, unknown> = {};
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
+    variables = body.variables;
+    assert.match(body.query, /orderBy: requestId/);
+    return Response.json({
+      data: {
+        goalRequests: [{ id: '1', icon: 6 }],
+        _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+      },
+    });
+  });
+
+  const page = await new GraphService(settings, rpc).goalRequests('8', {
+    first: 1,
+    skip: 1,
+    blockHash: rpcHash,
+  });
+
+  assert.equal(variables.family, '8');
+  assert.deepEqual(variables.block, { hash: rpcHash });
+  assert.equal(page.nextOffset, 2);
+  assert.equal(page.requests[0]?.icon, 6);
+});
+
+test('filters the parent inbox by family, child, and workflow view', async () => {
+  let variables: Record<string, unknown> = {};
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    variables = (JSON.parse(String(init?.body)) as { variables: Record<string, unknown> })
+      .variables;
+    return Response.json({
+      data: {
+        quests: [],
+        starRequests: [{ id: 'workflow-1' }],
+        _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+      },
+    });
+  });
+  const graph = new GraphService(settings, rpc);
+
+  const waiting = await graph.inbox('7', {
+    childId: '9',
+    view: 'waiting',
+    first: 1,
+    skip: 0,
+  });
+  assert.deepEqual(variables.requestsWhere, {
+    family: '7',
+    child: '9',
+    status_in: ['PENDING'],
+  });
+  assert.deepEqual(variables.questsWhere, {
+    family: '7',
+    child: '9',
+    status_in: ['SUBMITTED'],
+  });
+  assert.equal(waiting.nextOffset, 1);
+  assert.equal(waiting.indexing.blockLag, 5);
+
+  await graph.inbox('7', { view: 'history', first: 50, skip: 50 });
+  assert.deepEqual(variables.requestsWhere, {
+    family: '7',
+    status_in: ['APPROVED', 'REJECTED', 'CANCELLED'],
+  });
+  assert.deepEqual(variables.questsWhere, {
+    family: '7',
+    status_in: ['COMPLETED', 'CANCELLED'],
+  });
+});
+
+test('pins every parent-inbox collection and metadata to one snapshot', async () => {
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
+    assert.deepEqual(body.variables.block, { hash: rpcHash });
+    assert.deepEqual(body.variables.requestsWhere, { family: '7', status_in: ['PENDING'] });
+    assert.match(body.query, /quests\(block: \$block/);
+    assert.match(body.query, /starRequests\(block: \$block/);
+    assert.match(body.query, /_meta\(block: \$block/);
+    return Response.json({
+      data: {
+        quests: [],
+        starRequests: [],
+        _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+      },
+    });
+  });
+
+  const page = await new GraphService(settings, rpc).inbox('7', {
+    view: 'waiting',
+    first: 100,
+    skip: 100,
+    blockHash: rpcHash,
+  });
+
+  assert.equal(page.nextOffset, null);
+  assert.equal(page.indexing.block.hash, rpcHash);
+});
+
+test('rejects a changed parent-inbox snapshot instead of losing pending actions', async () => {
+  mock.method(globalThis, 'fetch', async () =>
+    Response.json({
+      data: {
+        quests: [],
+        starRequests: [],
+        _meta: { deployment, block: { number: 995, hash: rpcHash }, hasIndexingErrors: false },
+      },
+    }),
+  );
+
+  await assert.rejects(
+    new GraphService(settings, rpc).inbox('7', {
+      view: 'waiting',
+      first: 100,
+      skip: 100,
+      blockHash: `0x${'34'.repeat(32)}`,
+    }),
+    /different pagination snapshot/,
+  );
+});

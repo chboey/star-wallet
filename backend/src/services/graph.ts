@@ -104,6 +104,29 @@ const childQuery = `
 `;
 
 const indexingQuery = `query Indexing { _meta { deployment block { number hash timestamp } hasIndexingErrors } }`;
+const inboxQuery = `
+  query Inbox($questsWhere: Quest_filter!, $requestsWhere: StarRequest_filter!, $first: Int!, $skip: Int!, $block: Block_height) {
+    quests(block: $block, where: $questsWhere, first: $first, skip: $skip, orderBy: questId, orderDirection: desc) {
+      id questId workflow title stars status createdAt updatedAt child { id wallet ensName }
+    }
+    starRequests(block: $block, where: $requestsWhere, first: $first, skip: $skip, orderBy: requestId, orderDirection: desc) {
+      id requestId workflow stars reason status submissionId createdAt updatedAt
+      creationTransactionHash resolutionTransactionHash
+      child { id wallet ensName } quest { id questId title } reward { id transactionHash }
+    }
+    _meta(block: $block) { deployment block { number hash timestamp } hasIndexingErrors }
+  }
+`;
+const goalRequestsQuery = `
+  query GoalRequests($family: String!, $first: Int!, $skip: Int!, $block: Block_height) {
+    goalRequests(where: { family: $family }, first: $first, skip: $skip, block: $block, orderBy: requestId, orderDirection: desc) {
+      id title reason icon status submissionId requestedAt resolvedAt
+      requestTransactionHash resolutionTransactionHash
+      child { id wallet ensName } goal { id title starCost status }
+    }
+    _meta(block: $block) { deployment block { number hash timestamp } hasIndexingErrors }
+  }
+`;
 
 export type Pagination = { first: number; skip: number };
 type SnapshotPagination = Pagination & { blockHash?: string };
@@ -135,6 +158,56 @@ export class GraphService {
     this.sepoliaClient =
       sepoliaClient ??
       createPublicClient({ chain: sepolia, transport: http(settings.SEPOLIA_RPC_URL) });
+  }
+
+  async goalRequests(family: string, page: SnapshotPagination) {
+    const data = await this.query<{
+      goalRequests: Array<Record<string, unknown>>;
+      _meta: IndexingStatus;
+    }>(goalRequestsQuery, { family, ...snapshotVariables(page) });
+    const indexing = await this.requireFreshIndex(data._meta);
+    assertSnapshot(indexing, page);
+    return {
+      requests: data.goalRequests,
+      nextOffset: data.goalRequests.length === page.first ? page.skip + page.first : null,
+      indexing,
+    };
+  }
+
+  async inbox(
+    family: string,
+    page: SnapshotPagination & { childId?: string; view: 'available' | 'waiting' | 'history' },
+  ) {
+    const scope = { family, ...(page.childId ? { child: page.childId } : {}) };
+    const data = await this.query<{
+      quests: Array<Record<string, unknown>>;
+      starRequests: Array<Record<string, unknown>>;
+      _meta: IndexingStatus;
+    }>(inboxQuery, {
+      questsWhere: {
+        ...scope,
+        status_in:
+          page.view === 'history'
+            ? ['COMPLETED', 'CANCELLED']
+            : [page.view === 'available' ? 'ACTIVE' : 'SUBMITTED'],
+      },
+      requestsWhere: {
+        ...scope,
+        status_in: page.view === 'history' ? ['APPROVED', 'REJECTED', 'CANCELLED'] : ['PENDING'],
+      },
+      ...snapshotVariables(page),
+    });
+    const indexing = await this.requireFreshIndex(data._meta);
+    assertSnapshot(indexing, page);
+    return {
+      quests: data.quests,
+      requests: data.starRequests,
+      nextOffset:
+        data.quests.length === page.first || data.starRequests.length === page.first
+          ? page.skip + page.first
+          : null,
+      indexing,
+    };
   }
 
   async family(
