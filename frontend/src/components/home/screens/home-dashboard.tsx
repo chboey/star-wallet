@@ -5,7 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Hash } from "viem";
-import { availableStars, displayEnsName, formatUsd18 } from "@/lib/star-format";
+import {
+  availableStars,
+  displayEnsName,
+  formatUsd18,
+  goalIllustration,
+} from "@/lib/star-format";
 import { goalIconAsset } from "@/lib/goal-requests";
 import { ActionStatus } from "../action-status";
 import { GoalRequestSheet } from "../goal-request-sheet";
@@ -61,6 +66,9 @@ export function HomeDashboard({
   const activities = family?.activities ?? [];
   const pendingGoalRequests = goalRequests.filter(
     (request) => request.status === "PENDING",
+  );
+  const pendingRedemptions = (family?.redemptions ?? []).filter(
+    (redemption) => redemption.status === "PENDING",
   );
   const recentActivities = family
     ? presentRecentActivities(activities, family)
@@ -164,6 +172,39 @@ export function HomeDashboard({
       ) : !pendingGoalRequests.length ? (
         <SectionEmptyState />
       ) : null}
+
+      <SectionTitle>Reward requests</SectionTitle>
+      {pendingRedemptions.map((redemption) => {
+        const requestChild = family?.children.find(
+          (child) => child.id === redemption.child?.id,
+        );
+        return (
+          <Link
+            className="goal-request-summary"
+            href={`/wallet/rewards/${redemption.id}`}
+            key={redemption.id}
+          >
+            <HomeIllustration
+              name={goalIllustration(
+                redemption.goal.title,
+                redemption.goal.icon,
+              )}
+              collection="kid"
+              alt=""
+              size={56}
+            />
+            <span>
+              <strong>{redemption.goal.title}</strong>
+              <small>
+                {displayEnsName(requestChild?.ensName, "Child")} wants to claim
+                this goal
+              </small>
+            </span>
+            <ChevronRight size={18} aria-hidden="true" />
+          </Link>
+        );
+      })}
+      {!pendingRedemptions.length && <SectionEmptyState />}
 
       <SectionTitle
         action={

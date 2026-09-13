@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { childAccountAbi } from "@star/contracts/abi";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Hash } from "viem";
+import { decodeFunctionData, type Hash } from "viem";
 import { sepolia } from "viem/chains";
 import {
   useAccount,
@@ -165,6 +165,40 @@ export function useStarIntents() {
           family!.children,
           child,
         );
+      }
+      if (action === "requestRedemption" || action === "cancelRedemption") {
+        if (
+          !child?.wallet ||
+          signerRole !== "CHILD" ||
+          envelope.intents.some(
+            (intent) => intent.to.toLowerCase() !== child.wallet.toLowerCase(),
+          )
+        )
+          throw new Error(
+            "The request must target the selected child's passkey account.",
+          );
+        const requestedId =
+          "goalId" in body
+            ? body.goalId
+            : "redemptionId" in body
+              ? body.redemptionId
+              : undefined;
+        for (const intent of envelope.intents) {
+          const decoded = decodeFunctionData({
+            abi: childAccountAbi,
+            data: intent.data,
+          });
+          if (
+            requestedId === undefined ||
+            decoded.functionName !== action ||
+            ((decoded.functionName === "requestRedemption" ||
+              decoded.functionName === "cancelRedemption") &&
+              decoded.args[0] !== BigInt(requestedId))
+          )
+            throw new Error(
+              "The child operation does not match the requested action.",
+            );
+        }
       }
       if (
         envelope.intents.some(

@@ -13,6 +13,7 @@ export function KidJourneyScreen({
     <div className="wallet-screen kid-journey-screen">
       {!initialGoalId && <KidScreenHeader title="My goals" />}
       <KidGoalsScreen
+        initialView="list"
         embedded
         initialTab={initialGoalTab}
         initialGoalId={initialGoalId}

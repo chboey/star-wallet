@@ -2449,6 +2449,75 @@ button.kid-hero-card {
   width: 100%;
 }
 
+/* Goal claims and completion */
+
+.kid-goal-detail-footer {
+  flex: 0 0 auto;
+}
+
+.kid-goal-detail-footer > .kid-primary-action {
+  margin-top: 0;
+}
+
+.kid-status-panel {
+  min-height: 76px;
+  margin-top: 22px;
+  padding: 13px 15px;
+  border: 1px solid #e9e5f8;
+  border-radius: 15px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--purple);
+  background: #f7f4ff;
+}
+
+.kid-status-panel strong,
+.kid-status-panel small {
+  display: block;
+}
+
+.kid-status-panel strong {
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kid-status-panel small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.kid-ready-message {
+  min-height: 58px;
+  margin-top: 22px;
+  padding: 12px 16px;
+  border: 1px solid #e9e5f8;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: white;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.kid-ready-message.kid-redeemed-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.kid-redeemed-message > svg {
+  flex-shrink: 0;
+}
+
 @media (max-width: 520px) {
   .wallet-app-page {
     min-height: 100svh;
