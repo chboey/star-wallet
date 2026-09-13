@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { createElement } from "react";
@@ -76,4 +77,18 @@ test("pending actions open a popup from a right-chevron card, never an inline dr
   assert.match(link, /<button class="questCard questSummary questLink"/);
   assert.match(link, /questChevron/);
   assert.doesNotMatch(link, /<details/);
+});
+
+test("parents review pending requests in a separate sheet and submitted kid quests stay non-cancellable", () => {
+  const source = readFileSync(
+    new URL("../src/components/home/quest-inbox.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /expandable=\{\s*childOnly &&\s*request.status === "PENDING" &&\s*!request.quest/,
+  );
+  assert.match(source, /!childOnly && request.status === "PENDING"/);
+  assert.match(source, /setReviewRequest\(request\)/);
+  assert.match(source, /<RequestReviewSheet[\s\S]*?request=\{reviewRequest\}/);
 });

@@ -1,96 +1,240 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
-import { type FormEvent, useRef, useState } from "react";
-import { StarApiError } from "@/lib/star-api";
-import { displayEnsName } from "@/lib/star-format";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ChevronDown, LoaderCircle, Plus } from "lucide-react";
 import { submissionId } from "@/lib/star-submissions";
-import { questTemplateValues, type QuestTemplate } from "@/lib/quest-templates";
+import type { InboxView, StarRequest } from "@/lib/quest-types";
+import type { InboxScope } from "@/lib/quest-inbox";
+import {
+  StarApiError,
+  type IntentAction,
+  type IntentInputs,
+} from "@/lib/star-api";
+import { displayEnsName } from "@/lib/star-format";
+import { ParentActionSheet } from "./parent-action-sheet";
 import { ActionStatus, IntentStatus } from "./action-status";
 import { FullScreenLoader, SectionEmptyState } from "./home-ui";
 import { KidIllustration } from "./kid-ui";
-import { KidQuestPreview } from "./kid-quest-preview";
-import { ParentActionSheet } from "./parent-action-sheet";
-import { ParentTransactionDetails } from "./parent-transaction-details";
 import { QuestCard } from "./quest-card";
-import { QuestAssignedSuccess, QuestSubmitButton } from "./quest-form-feedback";
+import { RequestReviewSheet } from "./request-review-sheet";
+import { KidQuestPreview } from "./kid-quest-preview";
 import { QuestTemplatePicker } from "./quest-template-picker";
+import {
+  CancelStarRequestButton,
+  QuestAssignedSuccess,
+  QuestSubmitButton,
+} from "./quest-form-feedback";
+import { questTemplateValues, type QuestTemplate } from "@/lib/quest-templates";
+import { useQuestInbox } from "./use-quest-inbox";
 import { useStarData } from "./star-data-provider";
 import { useStarIntents } from "./use-star-intents";
-import { useQuestInbox } from "./use-quest-inbox";
+import { ParentTransactionDetails } from "./parent-transaction-details";
+import { useVerticalSectionPaging } from "./use-vertical-section-paging";
 import styles from "./quest-inbox.module.css";
-import assignmentStyles from "./quest-assignment.module.css";
 
 export function QuestInbox({
-  childOnly,
+  childOnly = false,
+  onCreate,
+  scope = "all",
   enabled = true,
+  onBusyChange,
+  onReviewRequest,
+  initialRequestId,
+  verticalPaging = false,
 }: {
-  childOnly: true;
+  childOnly?: boolean;
+  onCreate?: () => void;
+  scope?: InboxScope;
   enabled?: boolean;
+  onBusyChange?: (busy: boolean) => void;
+  onReviewRequest?: (request: StarRequest) => void;
+  initialRequestId?: string;
+  verticalPaging?: boolean;
 }) {
   const { family, child } = useStarData();
-  const [view, setView] = useState<"available" | "waiting" | "history">(
-    "available",
-  );
+  const initialView: InboxView = initialRequestId
+    ? "waiting"
+    : childOnly || scope === "quests"
+      ? "available"
+      : "waiting";
+  const [view, setView] = useState<InboxView>(initialView);
+  const pagingSequence = useRef(0);
+  const [pagingOverlay, setPagingOverlay] = useState<{
+    view: InboxView;
+    sequence: number;
+  } | null>(null);
+  const [focusedRequestId, setFocusedRequestId] = useState(initialRequestId);
+  const [form, setForm] = useState(false);
   const [preview, setPreview] = useState<{
     id: string;
     started: boolean;
   } | null>(null);
-  const [submissionSent, setSubmissionSent] = useState(false);
+  const query = useQuestInbox(
+    view,
+    childOnly,
+    scope,
+    enabled,
+    focusedRequestId,
+  );
+  const { execute, operation, resetOperation } = useStarIntents();
+  const lock = useRef(false);
   const [busy, setBusy] = useState(false);
   const [localMessage, setLocalMessage] = useState("");
-  const lock = useRef(false);
-  const query = useQuestInbox(view, childOnly, "quests", enabled);
-  const { execute, operation, resetOperation } = useStarIntents();
-  const selectedQuest = query.quests.find(
-    (quest) => quest.id === preview?.id && quest.child.id === child?.id,
+  const [operationTarget, setOperationTarget] = useState<string | null>(null);
+  const [reviewRequest, setReviewRequest] = useState<StarRequest | null>(null);
+  const [questSubmissionSent, setQuestSubmissionSent] = useState(false);
+  const openedInitialRequest = useRef<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    queueMicrotask(() => {
+      if (!current) return;
+      if (!verticalPaging || !enabled) {
+        setPagingOverlay(null);
+        return;
+      }
+      pagingSequence.current += 1;
+      setPagingOverlay({ view, sequence: pagingSequence.current });
+    });
+    return () => {
+      current = false;
+    };
+  }, [enabled, verticalPaging, view]);
+  useEffect(() => {
+    if (!pagingOverlay) return;
+    const timer = window.setTimeout(() => setPagingOverlay(null), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [pagingOverlay]);
+  useEffect(() => {
+    if (
+      childOnly ||
+      !initialRequestId ||
+      openedInitialRequest.current === initialRequestId
+    )
+      return;
+    const request = query.requests.find(
+      (item) => item.id === initialRequestId && item.status === "PENDING",
+    );
+    if (!request) return;
+    let current = true;
+    queueMicrotask(() => {
+      if (!current) return;
+      openedInitialRequest.current = initialRequestId;
+      if (onReviewRequest) onReviewRequest(request);
+      else setReviewRequest(request);
+    });
+    return () => {
+      current = false;
+    };
+  }, [childOnly, initialRequestId, onReviewRequest, query.requests]);
+  const views = (["available", "waiting", "history"] as const).filter(
+    (tab) => scope !== "stars" || tab !== "available",
   );
-  const cannotSubmit = Boolean(
-    !family?.active || !family.vault || !child?.active,
-  );
-
-  const submit = async (questId: string) => {
-    if (lock.current || !child || !family?.vault) return;
+  const changeView = (tab: InboxView) => {
+    if (lock.current || tab === view) return;
+    setView(tab);
+    setFocusedRequestId(undefined);
+    setOperationTarget(null);
+    setLocalMessage("");
+    resetOperation();
+  };
+  const { regionRef, scrollRef, direction, changePage, handlers } =
+    useVerticalSectionPaging({
+      enabled: verticalPaging && enabled,
+      index: views.indexOf(view),
+      count: views.length,
+      busy,
+      onChange: (index) => changeView(views[index]),
+    });
+  const run = async <A extends IntentAction>(
+    action: A,
+    input: IntentInputs[A],
+    key?: string,
+  ) => {
+    if (lock.current) return;
     lock.current = true;
     setBusy(true);
+    onBusyChange?.(true);
     setLocalMessage("");
-    const key = `star:quest:${family.vault.questsAddress}:${child.id}:${questId}`;
+    setOperationTarget(
+      "childId" in input && "id" in input
+        ? `${action === "cancelQuest" || action === "submitQuest" ? "quest" : "request"}:${input.childId}:${input.id}`
+        : null,
+    );
     try {
-      await execute(
-        "submitQuest",
-        { childId: child.id, id: questId, submissionId: submissionId(key) },
-        "CHILD",
-      );
-      sessionStorage.removeItem(key);
-      setPreview(null);
-      setView("waiting");
-      setSubmissionSent(true);
-    } catch (cause) {
+      await execute(action, input, childOnly ? "CHILD" : "PARENT");
+      setFocusedRequestId(undefined);
+      if (key) sessionStorage.removeItem(key);
+      return true;
+    } catch (error) {
+      // Only rotate an identifier after RPC proves that it was already consumed.
+      // Unknown transaction outcomes must keep the same identifier on retry.
       if (
-        cause instanceof StarApiError &&
-        cause.code === "SUBMISSION_ALREADY_RECORDED"
+        key &&
+        error instanceof StarApiError &&
+        error.code === "SUBMISSION_ALREADY_RECORDED"
       ) {
         sessionStorage.removeItem(key);
         await query.refetch();
       }
-      setLocalMessage(
-        cause instanceof Error ? cause.message : "Unable to submit the quest.",
-      );
+      return false;
     } finally {
       lock.current = false;
       setBusy(false);
+      onBusyChange?.(false);
     }
   };
-
-  if (!family || !child) return <SectionEmptyState />;
-
-  if (selectedQuest && preview)
+  const submit = async (questId: string) => {
+    if (!child || !family?.vault) return;
+    try {
+      const key = `star:quest:${family.vault.questsAddress}:${child.id}:${questId}`;
+      const submitted = await run(
+        "submitQuest",
+        { childId: child.id, id: questId, submissionId: submissionId(key) },
+        key,
+      );
+      if (submitted) {
+        setPreview(null);
+        setView("waiting");
+        setQuestSubmissionSent(true);
+      }
+    } catch {
+      setLocalMessage("Allow session storage to safely retry this submission.");
+    }
+  };
+  if (!family || (childOnly && !child)) return <SectionEmptyState />;
+  const cannotCreate =
+    busy ||
+    !family.active ||
+    !family.vault ||
+    (childOnly ? !child?.active : !family.children.some((c) => c.active));
+  const selectedQuest = childOnly
+    ? query.quests.find(
+        (quest) => quest.id === preview?.id && quest.child.id === child?.id,
+      )
+    : undefined;
+  const hasOperationCard =
+    query.quests.some(
+      (quest) => operationTarget === `quest:${quest.child.id}:${quest.questId}`,
+    ) ||
+    query.requests.some(
+      (request) =>
+        request.status === "PENDING" &&
+        operationTarget === `request:${request.child.id}:${request.requestId}`,
+    );
+  // A resolved request can leave the Waiting list during receipt/index refresh.
+  // Keep its transaction visible above Done until the parent dismisses it.
+  const showTransactionResult =
+    !childOnly &&
+    !busy &&
+    operation.state === "success" &&
+    Boolean(operation.transactionHashes?.length);
+  if (selectedQuest && preview) {
     return (
       <KidQuestPreview
         quest={selectedQuest}
         started={preview.started}
         busy={busy}
-        disabled={!enabled || cannotSubmit || Boolean(query.error)}
+        disabled={!enabled || cannotCreate || Boolean(query.error)}
         error={
           localMessage ||
           (operation.state === "error"
@@ -107,36 +251,139 @@ export function QuestInbox({
         onSubmit={() => void submit(selectedQuest.questId)}
       />
     );
-
+  }
   return (
-    <div className={styles.inbox}>
-      <div className={styles.toolbar}>
-        <div className={`kid-tabs ${styles.tabs}`} aria-label="Quest inbox">
-          {(["available", "waiting", "history"] as const).map((tab) => (
+    <div
+      className={`${styles.inbox} ${verticalPaging ? styles.pagedInbox : ""}`}
+      ref={regionRef}
+      role={verticalPaging ? "region" : undefined}
+      aria-label={
+        verticalPaging
+          ? "Star requests. Scroll or swipe up and down to switch between Waiting and Completed."
+          : undefined
+      }
+      tabIndex={verticalPaging ? 0 : undefined}
+      {...handlers}
+    >
+      {verticalPaging ? (
+        <>
+          <nav
+            className={`${styles.sectionPager} ${pagingOverlay ? styles.overlayVisible : ""}`}
+            aria-label="Star request sections"
+          >
+            {views.map((tab, index) => (
+              <button
+                key={tab}
+                type="button"
+                aria-label={`Show ${tab === "history" ? "Completed" : "Waiting"}`}
+                aria-current={view === tab ? "page" : undefined}
+                aria-pressed={view === tab}
+                disabled={busy}
+                onClick={(event) => changePage(index, event.timeStamp)}
+              >
+                <span className={styles.sectionPagerLine} aria-hidden="true" />
+              </button>
+            ))}
+          </nav>
+          {pagingOverlay && (
+            <div
+              className={styles.sectionSwitchOverlay}
+              style={{
+                top: `calc(50% + ${
+                  (views.indexOf(pagingOverlay.view) - (views.length - 1) / 2) *
+                  36
+                }px)`,
+              }}
+              role="status"
+              aria-live="polite"
+              key={pagingOverlay.sequence}
+            >
+              <span>
+                {pagingOverlay.view === "history" ? "Completed" : "Waiting"}
+              </span>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className={styles.toolbar}>
+          <div
+            className={`kid-tabs ${styles.tabs}`}
+            aria-label={scope === "stars" ? "Star requests" : "Quest inbox"}
+          >
+            {views.map((tab, index) => (
+              <button
+                key={tab}
+                type="button"
+                className={view === tab ? "active" : ""}
+                aria-pressed={view === tab}
+                disabled={busy}
+                onClick={(event) => {
+                  if (verticalPaging) changePage(index, event.timeStamp);
+                  else changeView(tab);
+                }}
+              >
+                {tab === "available"
+                  ? childOnly
+                    ? "Available"
+                    : "Quests"
+                  : tab === "waiting"
+                    ? "Waiting"
+                    : "Completed"}
+              </button>
+            ))}
+          </div>
+          {!childOnly && scope !== "stars" && (
             <button
-              key={tab}
+              className={styles.addQuest}
               type="button"
-              className={view === tab ? "active" : ""}
-              aria-pressed={view === tab}
+              aria-label="Assign a quest"
+              title="Assign a quest"
+              disabled={cannotCreate}
+              onClick={() => (onCreate ? onCreate() : setForm(true))}
+            >
+              <Plus size={22} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      )}
+      <div
+        className={styles.content}
+        ref={scrollRef}
+        key={view}
+        data-direction={verticalPaging ? direction : undefined}
+      >
+        {!hasOperationCard && (
+          <IntentStatus
+            operation={operation}
+            busy={busy}
+            error={localMessage}
+          />
+        )}
+        {showTransactionResult && (
+          <div className="parent-transaction-result">
+            <ParentTransactionDetails
+              hashes={operation.transactionHashes}
+              completed={!busy && operation.state === "success"}
+            />
+            <button
+              className="filled-action-button"
+              type="button"
               disabled={busy}
+              aria-busy={busy}
               onClick={() => {
-                if (lock.current || tab === view) return;
-                setView(tab);
-                setLocalMessage("");
+                if (lock.current) return;
                 resetOperation();
+                setOperationTarget(null);
+                setLocalMessage("");
               }}
             >
-              {tab === "available"
-                ? "Available"
-                : tab === "waiting"
-                  ? "Waiting"
-                  : "Completed"}
+              {busy && (
+                <LoaderCircle className="spin" size={18} aria-hidden="true" />
+              )}
+              Done
             </button>
-          ))}
-        </div>
-      </div>
-      <div className={styles.content} key={view}>
-        <IntentStatus operation={operation} busy={busy} error={localMessage} />
+          </div>
+        )}
         {query.isPending ? (
           <FullScreenLoader />
         ) : query.error ? (
@@ -145,7 +392,7 @@ export function QuestInbox({
             message={query.error.message}
             onRefresh={() => void query.refetch()}
             refreshing={query.isFetching}
-            refreshLabel="Refresh quests"
+            refreshLabel="Refresh requests"
           />
         ) : (
           <>
@@ -158,13 +405,48 @@ export function QuestInbox({
                     title={quest.title}
                     stars={quest.stars}
                     disabled={busy}
-                    onOpen={() => {
-                      if (lock.current) return;
-                      resetOperation();
-                      setLocalMessage("");
-                      setPreview({ id: quest.id, started: false });
-                    }}
-                  />
+                    onOpen={
+                      childOnly
+                        ? () => {
+                            if (lock.current) return;
+                            resetOperation();
+                            setLocalMessage("");
+                            setPreview({ id: quest.id, started: false });
+                          }
+                        : undefined
+                    }
+                    subtitle={
+                      !childOnly
+                        ? displayEnsName(quest.child.ensName, "Child")
+                        : undefined
+                    }
+                  >
+                    {!childOnly && (
+                      <>
+                        {operationTarget ===
+                          `quest:${quest.child.id}:${quest.questId}` && (
+                          <IntentStatus
+                            operation={operation}
+                            busy={busy}
+                            error={localMessage}
+                          />
+                        )}
+                        <button
+                          className="outline-action-button"
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            void run("cancelQuest", {
+                              childId: quest.child.id,
+                              id: quest.questId,
+                            })
+                          }
+                        >
+                          Cancel quest
+                        </button>
+                      </>
+                    )}
+                  </QuestCard>
                 ))}
               </>
             ) : (
@@ -175,11 +457,58 @@ export function QuestInbox({
                 {query.requests.map((request) => (
                   <QuestCard
                     key={request.id}
+                    expandable={
+                      childOnly &&
+                      request.status === "PENDING" &&
+                      !request.quest
+                    }
+                    initiallyOpen={childOnly && request.id === initialRequestId}
+                    popupTitle={request.quest ? "Quest" : "Star request"}
+                    disabled={busy}
+                    onOpen={
+                      !childOnly && request.status === "PENDING"
+                        ? () => {
+                            if (lock.current) return;
+                            resetOperation();
+                            setOperationTarget(null);
+                            setLocalMessage("");
+                            if (onReviewRequest) onReviewRequest(request);
+                            else setReviewRequest(request);
+                          }
+                        : undefined
+                    }
                     title={request.quest?.title ?? request.reason}
                     stars={request.stars}
-                    subtitle={`Quest · ${request.status.toLowerCase()}`}
-                    expandable={false}
-                  />
+                    subtitle={`${childOnly ? "" : `${displayEnsName(request.child.ensName, "Child")} · `}${request.quest ? "Quest" : "Star request"} · ${request.status.toLowerCase()}`}
+                  >
+                    {childOnly &&
+                      operationTarget ===
+                        `request:${request.child.id}:${request.requestId}` && (
+                        <IntentStatus
+                          operation={operation}
+                          busy={busy}
+                          error={localMessage}
+                        />
+                      )}
+                    {childOnly &&
+                      request.status === "PENDING" &&
+                      !request.quest && (
+                        <CancelStarRequestButton
+                          busy={
+                            busy &&
+                            operationTarget ===
+                              `request:${request.child.id}:${request.requestId}`
+                          }
+                          disabled={busy}
+                          onCancel={() =>
+                            void run("cancelStarRequest", {
+                              childId: request.child.id,
+                              id: request.requestId,
+                            })
+                          }
+                        />
+                      )}
+                  </QuestCard>
                 ))}
                 {view === "history" &&
                   query.quests.map((quest) => (
@@ -187,7 +516,7 @@ export function QuestInbox({
                       key={quest.id}
                       title={quest.title}
                       stars={quest.stars}
-                      subtitle={`Quest ${quest.status.toLowerCase()}`}
+                      subtitle={`${childOnly ? "" : `${displayEnsName(quest.child.ensName, "Child")} · `}Quest ${quest.status.toLowerCase()}`}
                     />
                   ))}
               </>
@@ -204,10 +533,34 @@ export function QuestInbox({
           </>
         )}
       </div>
-      {submissionSent && (
+      {form && (
+        <QuestForm
+          childOnly={childOnly}
+          onClose={() => {
+            setForm(false);
+          }}
+        />
+      )}
+      {reviewRequest && !childOnly && (
+        <RequestReviewSheet
+          key={reviewRequest.id}
+          request={reviewRequest}
+          onBusyChange={(pending) => {
+            lock.current = pending;
+            setBusy(pending);
+            onBusyChange?.(pending);
+          }}
+          onClose={() => {
+            if (lock.current) return;
+            setReviewRequest(null);
+            setFocusedRequestId(undefined);
+          }}
+        />
+      )}
+      {questSubmissionSent && childOnly && (
         <ParentActionSheet
           title="Quest complete"
-          onClose={() => setSubmissionSent(false)}
+          onClose={() => setQuestSubmissionSent(false)}
         >
           <div className="goal-request-result quest-submission-result">
             <KidIllustration name="paper_plane_sparkle" alt="" size={240} />
@@ -218,7 +571,7 @@ export function QuestInbox({
             <button
               className="filled-action-button"
               type="button"
-              onClick={() => setSubmissionSent(false)}
+              onClick={() => setQuestSubmissionSent(false)}
             >
               Done
             </button>
@@ -240,7 +593,7 @@ export function QuestForm({
   const [childId, setChildId] = useState(
     childOnly
       ? (child?.id ?? "")
-      : (family?.children.find((item) => item.active)?.id ?? ""),
+      : (family?.children.find((c) => c.active)?.id ?? ""),
   );
   const [text, setText] = useState("");
   const [stars, setStars] = useState("");
@@ -259,7 +612,6 @@ export function QuestForm({
     family.vault &&
     (childOnly ? child?.active : chosenChild?.active),
   );
-
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (
@@ -297,19 +649,15 @@ export function QuestForm({
         );
       if (childOnly) sessionStorage.removeItem(key);
       setDone(true);
-    } catch (cause) {
-      if (
-        cause instanceof StarApiError &&
-        cause.code === "SUBMISSION_ALREADY_RECORDED"
-      )
+    } catch (e) {
+      if (e instanceof StarApiError && e.code === "SUBMISSION_ALREADY_RECORDED")
         sessionStorage.removeItem(key);
-      setError(cause instanceof Error ? cause.message : "Unable to submit.");
+      setError(e instanceof Error ? e.message : "Unable to submit.");
     } finally {
       lock.current = false;
       setBusy(false);
     }
   };
-
   return (
     <ParentActionSheet
       key={childOnly ? "request" : step}
@@ -343,7 +691,7 @@ export function QuestForm({
           childName={displayEnsName(chosenChild?.ensName, "Child")}
         />
       ) : done ? (
-        <div className={assignmentStyles.success}>
+        <div className={styles.inbox}>
           <ActionStatus
             state="success"
             message="Request submitted. Your parent can review it."
@@ -354,7 +702,7 @@ export function QuestForm({
         </div>
       ) : !childOnly && step === "child" ? (
         <form
-          className={`parent-action-form ${assignmentStyles.form}`}
+          className={`parent-action-form ${styles.form}`}
           onSubmit={(event) => {
             event.preventDefault();
             if (canAssign) setStep("quest");
@@ -362,7 +710,7 @@ export function QuestForm({
         >
           <label>
             Child
-            <span className={assignmentStyles.selectControl}>
+            <span className={styles.selectControl}>
               <select
                 value={childId}
                 onChange={(event) => setChildId(event.target.value)}
@@ -394,7 +742,7 @@ export function QuestForm({
         </form>
       ) : (
         <form
-          className={`parent-action-form ${assignmentStyles.form}`}
+          className={`parent-action-form ${styles.form}`}
           onSubmit={(event) => void submit(event)}
         >
           {!childOnly && (
@@ -422,7 +770,7 @@ export function QuestForm({
                   maxLength={childOnly ? 128 : 64}
                   required
                   disabled={busy}
-                  onChange={(event) => setText(event.target.value)}
+                  onChange={(e) => setText(e.target.value)}
                 />
               </label>
               <label>
@@ -436,7 +784,7 @@ export function QuestForm({
                   step="1"
                   required
                   disabled={busy}
-                  onChange={(event) => setStars(event.target.value)}
+                  onChange={(e) => setStars(e.target.value)}
                 />
               </label>
               <IntentStatus operation={operation} busy={busy} error={error} />
@@ -455,6 +803,27 @@ export function QuestForm({
           )}
         </form>
       )}
+    </ParentActionSheet>
+  );
+}
+
+export function ParentQuestInboxSheet({
+  onClose,
+  initialRequestId,
+}: {
+  onClose: () => void;
+  initialRequestId?: string;
+}) {
+  const [creating, setCreating] = useState(false);
+  return creating ? (
+    <QuestForm childOnly={false} onClose={() => setCreating(false)} />
+  ) : (
+    <ParentActionSheet title="Quests" onClose={onClose}>
+      <QuestInbox
+        scope="quests"
+        initialRequestId={initialRequestId}
+        onCreate={() => setCreating(true)}
+      />
     </ParentActionSheet>
   );
 }

@@ -2520,6 +2520,126 @@ button.kid-hero-card {
 
 /* Quest assignment */
 
+.wallet-app-frame:has(.request-review-success) > .wallet-bottom-nav {
+  display: none;
+}
+
+.attention-list {
+  display: grid;
+  gap: 4px;
+}
+
+.attention-list > a,
+.attention-list > .attention-request {
+  position: relative;
+  min-height: 74px;
+  padding: 11px 0;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  color: var(--navy);
+  background: transparent;
+  text-decoration: none;
+}
+
+.attention-request {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.attention-request > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.attention-request > svg {
+  color: var(--purple);
+}
+
+.attention-list strong,
+.attention-list small {
+  display: block;
+}
+
+.attention-list strong {
+  font-size: 14px;
+}
+
+.attention-list small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.request-review-content {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  padding: 12px 0 0;
+  text-align: center;
+}
+
+.request-review-content h3,
+.request-review-content p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.request-review-content p {
+  color: var(--muted);
+}
+
+.request-review-success-status {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.request-review-success-status p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.quest-popup-content h3 {
+  color: var(--navy);
+  font-weight: 700;
+}
+
+.quest-popup-content p {
+  font-weight: 600;
+}
+
+.request-review-content .request-review-summary {
+  color: var(--navy);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.request-review-reward {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.request-review-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.request-review-content > button {
+  width: 100%;
+}
+
 .kid-journey-page {
   position: relative;
 }

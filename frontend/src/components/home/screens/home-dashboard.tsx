@@ -5,14 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Hash } from "viem";
-import {
-  availableStars,
-  displayEnsName,
-  formatUsd18,
-  goalIllustration,
-} from "@/lib/star-format";
-import { goalIconAsset } from "@/lib/goal-requests";
-import { ActionStatus } from "../action-status";
+import { availableStars, displayEnsName, formatUsd18 } from "@/lib/star-format";
+import type { StarRequest } from "@/lib/quest-types";
 import { GoalRequestSheet } from "../goal-request-sheet";
 import {
   HomeIllustration,
@@ -26,31 +20,37 @@ import { ParentActivitySheet } from "../parent-activity-sheet";
 import {
   ParentRewardStarsSheet,
   type ParentChildChoice,
+  type RewardPanel,
 } from "../parent-action-sheets";
 import { ParentActionSheet } from "../parent-action-sheet";
-import { QuestForm } from "../quest-inbox";
+import { ParentAttentionList } from "../parent-attention-list";
+import { ParentQuestInboxSheet } from "../quest-inbox";
+import { RequestReviewSheet } from "../request-review-sheet";
 import { RewardApprovalSuccess } from "../reward-approval-feedback";
+import { useParentAttention } from "../use-parent-attention";
 import { WalletActivitySheet } from "../wallet-activity-sheet";
 
 export function HomeDashboard({
+  initialQuestInboxOpen = false,
+  initialRewardPanel,
   initialRewardApprovalHashes,
 }: {
+  initialQuestInboxOpen?: boolean;
+  initialRewardPanel?: RewardPanel;
   initialRewardApprovalHashes?: readonly Hash[];
 } = {}) {
   const router = useRouter();
-  const {
-    family,
-    familyName,
-    portfolio,
-    goalRequests,
-    goalRequestsLoading,
-    goalRequestsError,
-    refresh,
-  } = useStarData();
+  const { family, familyName, portfolio } = useStarData();
+  const attention = useParentAttention();
   const [activityOpen, setActivityOpen] = useState(false);
   const [walletActivityOpen, setWalletActivityOpen] = useState(false);
-  const [rewardOpen, setRewardOpen] = useState(false);
-  const [questOpen, setQuestOpen] = useState(false);
+  const [rewardPanel, setRewardPanel] = useState<RewardPanel | null>(
+    initialRewardPanel ?? null,
+  );
+  const [questInboxOpen, setQuestInboxOpen] = useState(initialQuestInboxOpen);
+  const [attentionRequest, setAttentionRequest] = useState<StarRequest | null>(
+    null,
+  );
   const [goalRequestId, setGoalRequestId] = useState<string | null>(null);
   const [rewardApprovalOpen, setRewardApprovalOpen] = useState(
     initialRewardApprovalHashes !== undefined,
@@ -66,12 +66,6 @@ export function HomeDashboard({
       name: displayEnsName(child.ensName, "Child"),
     }));
   const activities = family?.activities ?? [];
-  const pendingGoalRequests = goalRequests.filter(
-    (request) => request.status === "PENDING",
-  );
-  const pendingRedemptions = (family?.redemptions ?? []).filter(
-    (redemption) => redemption.status === "PENDING",
-  );
   const recentActivities = family
     ? presentRecentActivities(activities, family)
     : [];
@@ -138,75 +132,23 @@ export function HomeDashboard({
         {!family?.children.length && <SectionEmptyState />}
       </section>
 
-      <SectionTitle>Goal requests</SectionTitle>
-      {pendingGoalRequests.map((request) => (
-        <button
-          className="goal-request-summary"
-          type="button"
-          key={request.id}
-          onClick={() => setGoalRequestId(request.id)}
-        >
-          <HomeIllustration
-            name={goalIconAsset(request.icon)}
-            collection="kid"
-            alt=""
-            size={56}
-          />
-          <span>
-            <strong>{request.title}</strong>
-            <small>
-              Requested by {displayEnsName(request.child.ensName, "Child")}
-            </small>
-          </span>
-          <ChevronRight size={18} aria-hidden="true" />
-        </button>
-      ))}
-      {goalRequestsLoading ? (
-        <ActionStatus state="working" message="Checking goal requests…" />
-      ) : goalRequestsError ? (
-        <ActionStatus
-          state="error"
-          message="Couldn’t load goal requests. Please try again."
-          onRefresh={() => void refresh(["goals"])}
-          refreshing={goalRequestsLoading}
-          refreshLabel="Refresh goal requests"
-        />
-      ) : !pendingGoalRequests.length ? (
-        <SectionEmptyState />
-      ) : null}
-
-      <SectionTitle>Reward requests</SectionTitle>
-      {pendingRedemptions.map((redemption) => {
-        const requestChild = family?.children.find(
-          (child) => child.id === redemption.child?.id,
-        );
-        return (
-          <Link
-            className="goal-request-summary"
-            href={`/wallet/rewards/${redemption.id}`}
-            key={redemption.id}
-          >
-            <HomeIllustration
-              name={goalIllustration(
-                redemption.goal.title,
-                redemption.goal.icon,
-              )}
-              collection="kid"
-              alt=""
-              size={56}
-            />
-            <span>
-              <strong>{redemption.goal.title}</strong>
-              <small>
-                {displayEnsName(requestChild?.ensName, "Child")} wants to claim
-                this goal
-              </small>
-            </span>
-            <ChevronRight size={18} aria-hidden="true" />
-          </Link>
-        );
-      })}
-      {!pendingRedemptions.length && <SectionEmptyState />}
+      <SectionTitle>Needs attention ({attention.items.length})</SectionTitle>
+      <ParentAttentionList
+        items={attention.items}
+        childProfiles={family?.children ?? []}
+        loading={attention.loading}
+        refreshing={attention.refreshing}
+        error={attention.error}
+        onRetry={() => void attention.refresh()}
+        onOpen={(item) => {
+          if (item.kind === "goal") setGoalRequestId(item.request.id);
+          if (item.kind === "stars" || item.kind === "quest") {
+            setRewardPanel(null);
+            setQuestInboxOpen(false);
+            setAttentionRequest(item.request);
+          }
+        }}
+      />
 
       <SectionTitle
         action={
@@ -252,14 +194,14 @@ export function HomeDashboard({
         className="dashboard-action-card"
         type="button"
         disabled={!family?.active || !family.vault || children.length === 0}
-        onClick={() => setQuestOpen(true)}
+        onClick={() => setQuestInboxOpen(true)}
       >
         <span>
           <ListChecks size={20} />
         </span>
         <div>
-          <strong>Assign a quest</strong>
-          <small>Choose a preset or create your own</small>
+          <strong>Quests</strong>
+          <small>Assign and review</small>
         </div>
         <ChevronRight size={18} />
       </button>
@@ -267,7 +209,7 @@ export function HomeDashboard({
         className="dashboard-action-card"
         type="button"
         disabled={!family?.vault || children.length === 0}
-        onClick={() => setRewardOpen(true)}
+        onClick={() => setRewardPanel("reward")}
       >
         <span>
           <Star size={20} fill="currentColor" />
@@ -278,14 +220,23 @@ export function HomeDashboard({
         </div>
         <ChevronRight size={18} />
       </button>
-      {rewardOpen && (
+      {rewardPanel !== null && (
         <ParentRewardStarsSheet
           childChoices={children}
-          onClose={() => setRewardOpen(false)}
+          initialPanel={rewardPanel}
+          onClose={() => setRewardPanel(null)}
         />
       )}
-      {questOpen && (
-        <QuestForm childOnly={false} onClose={() => setQuestOpen(false)} />
+      {questInboxOpen && (
+        <ParentQuestInboxSheet onClose={() => setQuestInboxOpen(false)} />
+      )}
+      {attentionRequest && (
+        <RequestReviewSheet
+          key={attentionRequest.id}
+          request={attentionRequest}
+          onBusyChange={() => {}}
+          onClose={() => setAttentionRequest(null)}
+        />
       )}
       {goalRequestId && (
         <GoalRequestSheet
