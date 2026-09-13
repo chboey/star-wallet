@@ -2,6 +2,7 @@
 
 import { ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { availableStars } from "@/lib/star-format";
 import {
   HomeIllustration,
@@ -11,13 +12,27 @@ import {
 } from "../home-ui";
 import { KidIllustration } from "../kid-ui";
 import { useStarData } from "../star-data-provider";
+import { isChildActivity, presentRecentActivities } from "../star-activity";
+import { KidActivitySheet } from "../kid-activity-sheet";
 
 export function KidHomeScreen() {
-  const { child, childName } = useStarData();
+  const { child, childName, family } = useStarData();
+  const [activityOpen, setActivityOpen] = useState(false);
   const goal = child?.goals?.find((item) => item.status === "ACTIVE");
   const allocated = BigInt(goal?.allocatedStars ?? 0);
   const cost = BigInt(goal?.starCost ?? 0);
   const progress = cost ? Number((allocated * 100n) / cost) : 0;
+  const childActivities =
+    family && child
+      ? family.activities.filter(
+          (activity) =>
+            activity.type !== "PRINCIPAL_CONTRIBUTED" &&
+            isChildActivity(activity, family, child.id),
+        )
+      : [];
+  const recentActivities = family
+    ? presentRecentActivities(childActivities, family, true)
+    : [];
 
   return (
     <div className="wallet-screen kid-dashboard">
@@ -66,6 +81,30 @@ export function KidHomeScreen() {
         My progress
       </SectionTitle>
 
+      {recentActivities.length ? (
+        <section className="dashboard-activity-list">
+          {recentActivities.map((row) => (
+            <article key={row.id}>
+              <KidIllustration name={row.kidIllustration} alt="" size={42} />
+              <span>{row.title}</span>
+              <strong>
+                {row.amount ?? ""} {row.currency ?? ""}
+              </strong>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <SectionEmptyState />
+      )}
+
+      <button
+        className="kid-activity-link"
+        type="button"
+        onClick={() => setActivityOpen(true)}
+      >
+        See all activity <ChevronRight size={15} />
+      </button>
+
       <div className="kid-quick-actions">
         <Link href="/wallet/kid/journey">
           <HomeIllustration
@@ -83,6 +122,9 @@ export function KidHomeScreen() {
           <strong>My profile</strong>
         </Link>
       </div>
+      {activityOpen && (
+        <KidActivitySheet onClose={() => setActivityOpen(false)} />
+      )}
     </div>
   );
 }

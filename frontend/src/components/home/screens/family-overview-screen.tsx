@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   displayEnsName,
   formatTokenAmount,
@@ -7,10 +8,12 @@ import {
 } from "@/lib/star-format";
 import { HomeIllustration, SectionEmptyState, SectionTitle } from "../home-ui";
 import { useStarData } from "../star-data-provider";
+import { VaultActivitySheet } from "../vault-activity-sheet";
 
 export function FamilyOverviewScreen() {
   const { family, familyName, portfolio } = useStarData();
   const savings = family?.savings;
+  const [activityOpen, setActivityOpen] = useState(false);
 
   return (
     <div className="wallet-screen family-overview-screen">
@@ -42,6 +45,13 @@ export function FamilyOverviewScreen() {
               {formatTokenAmount(savings?.availableWeth, 18, 6)} WETH
             </strong>
           </article>
+          <button
+            className="family-activity-button"
+            type="button"
+            onClick={() => setActivityOpen(true)}
+          >
+            View vault activity
+          </button>
         </section>
       ) : (
         <SectionEmptyState />
@@ -79,6 +89,9 @@ export function FamilyOverviewScreen() {
         </section>
       ) : (
         <SectionEmptyState />
+      )}
+      {activityOpen && (
+        <VaultActivitySheet onClose={() => setActivityOpen(false)} />
       )}
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { ChevronRight, ListChecks } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { availableStars, displayEnsName, formatUsd18 } from "@/lib/star-format";
 import {
   HomeIllustration,
@@ -10,10 +11,18 @@ import {
   StarValue,
 } from "../home-ui";
 import { useStarData } from "../star-data-provider";
+import { presentRecentActivities } from "../star-activity";
+import { ParentActivitySheet } from "../parent-activity-sheet";
+import { WalletActivitySheet } from "../wallet-activity-sheet";
 
 export function HomeDashboard() {
   const { family, familyName, portfolio } = useStarData();
-  const recent = family?.activities.slice(0, 3) ?? [];
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [walletActivityOpen, setWalletActivityOpen] = useState(false);
+  const activities = family?.activities ?? [];
+  const recentActivities = family
+    ? presentRecentActivities(activities, family)
+    : [];
 
   return (
     <div className="wallet-screen home-dashboard">
@@ -33,7 +42,11 @@ export function HomeDashboard() {
         </div>
       </header>
 
-      <section className="dashboard-balance-card">
+      <button
+        className="dashboard-balance-card"
+        type="button"
+        onClick={() => setWalletActivityOpen(true)}
+      >
         <div>
           <span>Family savings</span>
           <strong>
@@ -47,7 +60,7 @@ export function HomeDashboard() {
           size={108}
           collection="kid"
         />
-      </section>
+      </button>
 
       <SectionTitle
         action={
@@ -73,14 +86,29 @@ export function HomeDashboard() {
         {!family?.children.length && <SectionEmptyState />}
       </section>
 
-      <SectionTitle>Recent activity</SectionTitle>
-      {recent.length ? (
+      <SectionTitle
+        action={
+          <button type="button" onClick={() => setActivityOpen(true)}>
+            See all <ChevronRight size={15} />
+          </button>
+        }
+      >
+        Recent activity
+      </SectionTitle>
+      {recentActivities.length ? (
         <section className="dashboard-activity-list">
-          {recent.map((item) => (
-            <article key={item.id}>
-              <HomeIllustration name="star" alt="" size={42} />
-              <span>{activityLabel(item.type)}</span>
-              <strong>{item.amount ? `+${item.amount}` : "Updated"}</strong>
+          {recentActivities.map((row) => (
+            <article key={row.id}>
+              <HomeIllustration
+                name={row.homeIllustration}
+                collection={row.homeIllustrationCollection}
+                alt=""
+                size={42}
+              />
+              <span>{row.title}</span>
+              <strong>
+                {row.amount ?? ""} {row.currency ?? ""}
+              </strong>
             </article>
           ))}
         </section>
@@ -98,14 +126,12 @@ export function HomeDashboard() {
         </div>
         <ChevronRight size={18} />
       </Link>
+      {activityOpen && (
+        <ParentActivitySheet onClose={() => setActivityOpen(false)} />
+      )}
+      {walletActivityOpen && (
+        <WalletActivitySheet onClose={() => setWalletActivityOpen(false)} />
+      )}
     </div>
   );
-}
-
-function activityLabel(type: string) {
-  return type
-    .toLowerCase()
-    .split("_")
-    .map((part) => part[0]?.toUpperCase() + part.slice(1))
-    .join(" ");
 }

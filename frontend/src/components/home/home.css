@@ -313,6 +313,7 @@
 
 .dashboard-balance-card,
 .kid-hero-card {
+  width: 100%;
   min-height: 150px;
   padding: 22px;
   border: 1px solid #ded6fb;
@@ -322,6 +323,12 @@
   justify-content: space-between;
   overflow: hidden;
   background: linear-gradient(135deg, #f7f3ff, #fff8e9);
+  color: var(--navy);
+  text-align: left;
+}
+
+button.dashboard-balance-card {
+  cursor: pointer;
 }
 
 .dashboard-balance-card > div,
@@ -880,6 +887,271 @@
   border-radius: 999px;
   color: var(--success);
   background: #e9f8f2;
+}
+
+.family-activity-button,
+.kid-activity-link {
+  min-height: 40px;
+  border: 0;
+  border-radius: 12px;
+  color: var(--purple);
+  background: #f4f0ff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.family-activity-button {
+  grid-column: 1 / -1;
+}
+
+.kid-activity-link {
+  width: 100%;
+  margin-top: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* Activity sheets */
+
+.sheet-empty-state {
+  min-height: 150px;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.activity-load-more {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+  border: 1px solid #e6e2f5;
+  border-radius: 12px;
+  color: var(--purple);
+  background: #f7f4ff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.add-funds-backdrop {
+  position: absolute;
+  z-index: 35;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: rgba(22, 17, 57, 0.34);
+  cursor: default;
+  backdrop-filter: blur(2px);
+}
+
+.add-funds-sheet,
+.onchain-details-sheet {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 82%;
+  padding: 0 20px calc(20px + env(safe-area-inset-bottom));
+  border: 1px solid #e4def8;
+  border-radius: 24px 24px 0 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: white;
+  box-shadow: 0 24px 60px rgba(29, 20, 78, 0.28);
+  scrollbar-width: none;
+}
+
+.add-funds-sheet::-webkit-scrollbar,
+.onchain-details-sheet::-webkit-scrollbar {
+  display: none;
+}
+
+.add-funds-sheet-header {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
+}
+
+.add-funds-sheet-header h2 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-align: center;
+}
+
+.add-funds-sheet-header button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--navy);
+  background: #f7f5fd;
+  cursor: pointer;
+}
+
+.parent-action-sheet,
+.parent-activity-sheet,
+.kid-activity-sheet,
+.wallet-activity-sheet {
+  max-height: 76%;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom));
+}
+
+.parent-activity-sheet-list,
+.kid-activity-sheet-list {
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  list-style: none;
+}
+
+.parent-activity-sheet-list > li,
+.kid-activity-sheet-list > li {
+  min-height: 78px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #efecf7;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.parent-activity-sheet-list > li:last-child,
+.kid-activity-sheet-list > li:last-child,
+.wallet-activity-row:last-child {
+  border-bottom: 0;
+}
+
+.parent-activity-sheet-list > li > span:nth-child(2),
+.kid-activity-sheet-list > li > span:nth-child(2) {
+  min-width: 0;
+}
+
+.parent-activity-sheet-list strong,
+.parent-activity-sheet-list small,
+.kid-activity-sheet-list strong,
+.kid-activity-sheet-list small {
+  display: block;
+}
+
+.parent-activity-sheet-list strong,
+.kid-activity-sheet-list strong {
+  overflow: hidden;
+  color: var(--navy);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parent-activity-sheet-list small,
+.kid-activity-sheet-list small {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parent-activity-sheet-stars,
+.kid-activity-sheet-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.parent-activity-sheet-stars svg,
+.kid-activity-sheet-stars svg {
+  flex: 0 0 auto;
+  color: #ffb820;
+}
+
+.wallet-activity-list {
+  margin-top: 5px;
+  display: grid;
+}
+
+.wallet-activity-row {
+  min-height: 78px;
+  padding: 12px 2px;
+  border-bottom: 1px solid #efecf7;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.wallet-activity-row > .home-illustration {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+.wallet-activity-copy,
+.wallet-activity-copy strong,
+.wallet-activity-copy small,
+.wallet-activity-amount strong,
+.wallet-activity-amount small {
+  min-width: 0;
+  display: block;
+}
+
+.wallet-activity-copy strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-activity-copy small {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-activity-amount {
+  text-align: right;
+}
+
+.wallet-activity-amount strong {
+  font-size: 13px;
+}
+
+.wallet-activity-amount.is-incoming strong {
+  color: #239c5d;
+}
+
+.wallet-activity-amount small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 /* Profile switcher */
