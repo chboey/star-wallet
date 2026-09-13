@@ -4,6 +4,7 @@ import { ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { availableStars } from "@/lib/star-format";
+import { kidGoalsHref } from "@/lib/kid-goals";
 import {
   HomeIllustration,
   SectionEmptyState,
@@ -73,7 +74,7 @@ export function KidHomeScreen() {
 
       <SectionTitle
         action={
-          <Link href="/wallet/kid/journey">
+          <Link href={kidGoalsHref()}>
             See journey <ChevronRight size={15} />
           </Link>
         }
@@ -106,7 +107,7 @@ export function KidHomeScreen() {
       </button>
 
       <div className="kid-quick-actions">
-        <Link href="/wallet/kid/journey">
+        <Link href={kidGoalsHref()}>
           <HomeIllustration
             name="star_sparkle"
             alt=""

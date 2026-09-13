@@ -1665,6 +1665,238 @@ button.dashboard-balance-card {
   min-height: 54px;
 }
 
+/* Child goals */
+
+.kid-journey-module {
+  width: 100%;
+  min-height: 0;
+}
+
+.kid-tabs {
+  min-height: 44px;
+  margin-top: 16px;
+  padding: 3px;
+  border-radius: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  background: #f5f3fb;
+}
+
+.kid-journey-module > .kid-tabs:first-child,
+.kid-flow-screen > .kid-tabs:first-child {
+  margin-top: 0;
+}
+
+.kid-tabs button {
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: clamp(10px, 2.8vw, 12px);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.kid-tabs button.active {
+  color: white;
+  background: var(--purple);
+  box-shadow: 0 5px 12px rgba(85, 44, 220, 0.18);
+}
+
+.kid-module-list {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.kid-goals-list {
+  gap: 10px;
+}
+
+.kid-goals-empty {
+  min-height: 260px;
+  margin-top: 16px;
+}
+
+.kid-goal-list-row {
+  width: 100%;
+  min-height: 104px;
+  padding: 14px 16px;
+  border: 1px solid #e8e4f5;
+  border-radius: 16px;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  color: var(--navy);
+  background: white;
+  box-shadow: 0 7px 20px rgba(35, 25, 92, 0.035);
+  cursor: pointer;
+  text-align: left;
+}
+
+.kid-goal-list-row > .kid-illustration {
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+}
+
+.kid-goal-list-row > span:nth-child(2) {
+  min-width: 0;
+}
+
+.kid-goal-list-row strong,
+.kid-goal-list-row small {
+  display: block;
+}
+
+.kid-goal-list-row strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kid-goal-list-row small {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kid-mini-progress {
+  width: 100%;
+  height: 5px;
+  margin-top: 8px;
+  border-radius: 999px;
+  display: block;
+  overflow: hidden;
+  background: #ece9f7;
+}
+
+.kid-mini-progress > span {
+  height: 100%;
+  border-radius: inherit;
+  display: block;
+  background: var(--purple);
+}
+
+.kid-goal-list-value {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.kid-goal-list-value svg {
+  margin-left: 3px;
+  color: var(--purple);
+}
+
+.kid-pinned-action-screen {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.kid-pinned-action-screen > .kid-screen-header {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
+.kid-goal-detail-content {
+  min-height: 0;
+  padding: 16px 0;
+  display: grid;
+  flex: 1 1 auto;
+  align-content: center;
+}
+
+.kid-detail-hero {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.kid-detail-hero > .kid-illustration {
+  width: auto;
+  max-width: 190px;
+  height: 164px;
+  object-fit: contain;
+}
+
+.kid-detail-hero h2 {
+  margin: 7px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.kid-detail-hero p {
+  max-width: 280px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.kid-large-goal-progress {
+  width: calc(100% - 32px);
+  margin: 15px auto 0;
+}
+
+.kid-large-goal-progress > strong {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 18px;
+}
+
+.kid-large-goal-progress > strong svg,
+.kid-goal-state-message svg {
+  color: #ffb820;
+}
+
+.kid-large-goal-progress > div {
+  height: 7px;
+  margin-top: 11px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #ebe8f7;
+}
+
+.kid-large-goal-progress > div > span {
+  height: 100%;
+  border-radius: inherit;
+  display: block;
+  background: var(--purple);
+}
+
+.kid-goal-state-message {
+  min-height: 48px;
+  margin: 22px auto 0;
+  padding: 0 16px;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--navy);
+  background: var(--lavender);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 @media (max-width: 520px) {
   .wallet-app-page {
     min-height: 100svh;
@@ -1685,6 +1917,21 @@ button.dashboard-balance-card {
 
 @media (max-width: 360px) {
   .wallet-bottom-nav a {
+    font-size: 9px;
+  }
+
+  .kid-goal-list-row {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding-inline: 9px;
+  }
+
+  .kid-goal-list-row > .kid-illustration {
+    width: 46px;
+    height: 46px;
+  }
+
+  .kid-goal-list-value {
     font-size: 9px;
   }
 }
