@@ -214,6 +214,119 @@
   text-decoration: none;
 }
 
+/* Profile switcher */
+
+.profile-switcher-active,
+.profile-switcher-active .wallet-app-scroll {
+  background: white;
+}
+
+.profile-switcher-screen {
+  min-height: 100%;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+  color: var(--navy);
+  background: white;
+}
+
+.profile-switcher-header {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  align-items: center;
+}
+
+.profile-switcher-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  text-align: center;
+}
+
+.profile-switcher-header button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--navy);
+  background: #f7f6fb;
+  cursor: pointer;
+}
+
+.profile-switcher-header button:disabled,
+.profile-switcher-profile:disabled {
+  cursor: wait;
+}
+
+.profile-switcher-list {
+  margin-top: 48px;
+  display: grid;
+  justify-items: center;
+  gap: 38px;
+}
+
+.profile-switcher-profile {
+  min-width: 160px;
+  padding: 0;
+  border: 0;
+  display: grid;
+  justify-items: center;
+  color: var(--navy);
+  background: transparent;
+  cursor: pointer;
+}
+
+.profile-switcher-avatar {
+  width: 118px;
+  height: 118px;
+  border: 4px solid white;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px #e8e2fb,
+    0 12px 26px rgba(37, 20, 105, 0.12);
+  transition:
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.profile-switcher-profile.is-active .profile-switcher-avatar {
+  box-shadow:
+    0 0 0 3px rgba(105, 56, 255, 0.6),
+    0 12px 26px rgba(37, 20, 105, 0.14);
+}
+
+.profile-switcher-profile:hover .profile-switcher-avatar {
+  transform: translateY(-2px);
+}
+
+.profile-switcher-profile:focus-visible {
+  border-radius: 18px;
+  outline: 2px solid rgba(105, 56, 255, 0.45);
+  outline-offset: 8px;
+}
+
+.profile-switcher-avatar .home-illustration {
+  width: 110px;
+  height: 110px;
+}
+
+.profile-switcher-avatar-child .home-illustration {
+  transform: scale(1.08);
+}
+
+.profile-switcher-profile strong {
+  margin-top: 14px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
 @media (max-width: 520px) {
   .wallet-app-page {
     min-height: 100svh;
