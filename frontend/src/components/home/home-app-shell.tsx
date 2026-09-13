@@ -8,6 +8,7 @@ import { clearWalletSelection } from "@/lib/wallet-context";
 import { readActiveProfile, saveActiveProfile } from "./active-profile";
 import { StarDataBoundary, useStarData } from "./star-data-provider";
 import { WalletRefreshStatus } from "./home-ui";
+import { ParentAuthorizationProvider } from "./parent-authorization-provider";
 
 const parentNavigation = [
   { href: "/wallet", label: "Home", icon: House },
@@ -50,31 +51,33 @@ export function HomeAppShell({ children }: { children: ReactNode }) {
       <section
         className={`wallet-app-frame ${profilesOpen ? "profile-switcher-active" : ""}`}
       >
-        <div className="wallet-app-scroll">
-          <StarDataBoundary>{children}</StarDataBoundary>
-        </div>
-        <WalletRefreshStatus requested={!loading && refreshRequested} />
-        {!profilesOpen && !loading && !needsOnboarding && family && (
-          <nav
-            className={`wallet-bottom-nav ${kidMode ? "kid-bottom-nav" : ""}`}
-            aria-label="Star Wallet navigation"
-          >
-            {navigation.map(({ href, label, icon: Icon }) => {
-              const active = isActivePath(pathname, href);
-              return (
-                <Link
-                  className={active ? "active" : ""}
-                  href={href}
-                  key={href}
-                  aria-current={active ? "page" : undefined}
-                >
-                  <Icon size={22} strokeWidth={active ? 2.6 : 2.1} />
-                  <span>{label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-        )}
+        <ParentAuthorizationProvider>
+          <div className="wallet-app-scroll">
+            <StarDataBoundary>{children}</StarDataBoundary>
+          </div>
+          <WalletRefreshStatus requested={!loading && refreshRequested} />
+          {!profilesOpen && !loading && !needsOnboarding && family && (
+            <nav
+              className={`wallet-bottom-nav ${kidMode ? "kid-bottom-nav" : ""}`}
+              aria-label="Star Wallet navigation"
+            >
+              {navigation.map(({ href, label, icon: Icon }) => {
+                const active = isActivePath(pathname, href);
+                return (
+                  <Link
+                    className={active ? "active" : ""}
+                    href={href}
+                    key={href}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <Icon size={22} strokeWidth={active ? 2.6 : 2.1} />
+                    <span>{label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          )}
+        </ParentAuthorizationProvider>
       </section>
     </main>
   );
