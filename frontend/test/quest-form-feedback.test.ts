@@ -49,6 +49,29 @@ test("idle and other disabled request buttons do not spin; cancellation callback
   assert.equal(cancelled, 1);
 });
 
+test("only the cancelling request spins, using the existing full-lifecycle operation lock", () => {
+  const source = readFileSync(
+    new URL("../src/components/home/quest-inbox.tsx", import.meta.url),
+    "utf8",
+  );
+  const button = source.match(/<CancelStarRequestButton[\s\S]*?\/>/)?.[0] ?? "";
+  assert.match(
+    button,
+    /busy=\{\s*busy &&\s*operationTarget ===\s*`request:\$\{request.child.id\}:\$\{request.requestId\}`/,
+  );
+  assert.match(button, /disabled=\{busy\}/);
+  assert.match(button, /onCancel=\{\(\) =>\s*void run\("cancelStarRequest",/);
+  assert.match(
+    source,
+    /if \(lock.current\) return;\s*lock.current = true;\s*setBusy\(true\)/,
+  );
+  assert.match(
+    source,
+    /await execute\(action, input, childOnly \? "CHILD" : "PARENT"\)/,
+  );
+  assert.match(source, /finally \{\s*lock.current = false;\s*setBusy\(false\)/);
+});
+
 test("assign quest spins inside the purple submit button only while busy", () => {
   for (const childOnly of [false, true]) {
     const busy = renderToStaticMarkup(

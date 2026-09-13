@@ -181,6 +181,15 @@ export function KidHomeScreen() {
       </button>
 
       <div className="kid-quick-actions">
+        <Link href="/wallet/kid/add-stars">
+          <HomeIllustration
+            name="jar_of_stars"
+            alt=""
+            size={48}
+            collection="kid"
+          />
+          <strong>Request Stars</strong>
+        </Link>
         <Link href={kidGoalsHref()}>
           <HomeIllustration
             name="star_sparkle"

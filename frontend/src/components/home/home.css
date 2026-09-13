@@ -2459,6 +2459,10 @@ button.kid-hero-card {
   margin-top: 0;
 }
 
+.kid-goal-detail-footer > .kid-ask-parent-button {
+  margin-top: 0;
+}
+
 .kid-status-panel {
   min-height: 76px;
   margin-top: 22px;
@@ -2519,6 +2523,84 @@ button.kid-hero-card {
 }
 
 /* Quest assignment */
+
+/* Kid quick Add Stars */
+
+.kid-add-stars-screen .kid-screen-header {
+  margin-bottom: 0;
+}
+
+.kid-star-request-form {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.kid-add-stars-hero > .kid-illustration {
+  width: min(240px, 100%);
+  max-width: 240px;
+  height: auto;
+}
+
+.kid-add-stars-hero h1 {
+  margin: 10px 0 0;
+  font-size: 23px;
+  font-weight: 700;
+}
+
+.kid-add-stars-hero p {
+  max-width: 220px;
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.kid-star-request-options {
+  margin: 24px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kid-star-request-options button {
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  color: var(--navy);
+  background: #f7f5fd;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kid-star-request-options button.active {
+  border-color: #cfc1ff;
+  color: var(--purple);
+  background: #f2eeff;
+  box-shadow: 0 6px 15px rgba(82, 41, 220, 0.08);
+}
+
+.filled-action-button.kid-ask-parent-button {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 24px;
+  background: var(--purple);
+}
+
+.kid-star-request-note {
+  max-width: 300px;
+  margin: 12px auto 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
 
 .wallet-app-frame:has(.request-review-success) > .wallet-bottom-nav {
   display: none;
