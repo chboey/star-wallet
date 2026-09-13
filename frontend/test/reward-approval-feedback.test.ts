@@ -92,7 +92,10 @@ test("approval locks before execution and hands its hashes to the Home popup", (
     source,
     /decisionLock.current = true;\s*setPendingDecision\(approved \? "approved" : "rejected"\);\s*try/,
   );
-  assert.match(source, /onTransactionHashes:[\s\S]*?approvalHashes = hashes/);
+  assert.match(
+    source,
+    /onTransactionHashes:[\s\S]*?approvalHashes = hashes/,
+  );
   assert.match(
     source,
     /finally \{\s*decisionLock.current = false;\s*setPendingDecision\(null\)/,

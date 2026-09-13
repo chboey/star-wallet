@@ -1,11 +1,11 @@
 import {
-  createParentSessionGasStub,
-  createPasskeyGasStub,
   decodeChildCall,
-  encodeParentSessionSignature,
   encodePasskeySignature,
-  maxPasskeyAuthenticatorDataBytes,
+  createPasskeyGasStub,
   maxPasskeyClientDataBytes,
+  maxPasskeyAuthenticatorDataBytes,
+  encodeParentSessionSignature,
+  createParentSessionGasStub,
 } from "@star/contracts/child-account";
 import { createPublicClient, getAddress, http } from "viem";
 import { sepolia } from "viem/chains";
@@ -18,15 +18,15 @@ import {
   toSmartAccount,
   toWebAuthnAccount,
 } from "viem/account-abstraction";
-import { estimateChildOperationFees } from "./child-operation-fees";
-import type { ParentAuthorizationScope } from "./parent-authorization";
-import { signWithDevice, type AuthorizedDevice } from "./parent-device-key";
 import {
   starApi,
   type ChildCredential,
   type TransactionIntent,
 } from "./star-api";
 import { sepoliaTransport } from "./wagmi";
+import { estimateChildOperationFees } from "./child-operation-fees";
+import { signWithDevice, type AuthorizedDevice } from "./parent-device-key";
+import type { ParentAuthorizationScope } from "./parent-authorization";
 
 export function checkPasskeyOrigin(rpId: string) {
   if (!window.isSecureContext || window.location.hostname !== rpId)
@@ -84,7 +84,6 @@ export async function sendChildIntent(
     throw new Error(
       "Child account configuration does not match this deployment.",
     );
-
   const client = createPublicClient({
     chain: sepolia,
     transport: sepoliaTransport,

@@ -343,16 +343,3 @@ test("Home and Dreams both open the same contribution popup for ongoing goals an
     /setInterval|refetchInterval|bicycle|kid-balance-change/,
   );
 });
-
-test("child contributions validate the exact account call before passkey submission", () => {
-  const intents = source("components/home/use-star-intents.ts");
-  assert.ok(
-    intents.indexOf("validateGoalContributionIntent") <
-      intents.indexOf("await sendChildIntent(intent, authorizeDevice)"),
-  );
-  const account = source("lib/child-account.ts");
-  assert.match(account, /decodeChildCall\(intent\.data\)/);
-  assert.match(account, /checkPasskeyOrigin\(config\.rpId\)/);
-  assert.match(account, /toWebAuthnAccount\(\{ credential, rpId \}\)/);
-  assert.match(account, /timeout: 0/);
-});

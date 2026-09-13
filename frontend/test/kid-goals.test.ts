@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -46,6 +47,9 @@ const redemption = (status: StarRedemption["status"]): StarRedemption => ({
   requestedAt: "1",
   requestTransactionHash: "0x00",
 });
+const source = (path: string) =>
+  readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
+
 test("Goals exposes exactly Ongoing, Ready to claim and Completed", () => {
   assert.deepEqual(
     kidGoalTabs.map(({ label }) => label),
@@ -254,4 +258,59 @@ test("Goals links preserve the selected goal and status without accepting invali
     "nonsense",
   ])
     assert.equal(kidGoalTab(value), "ongoing");
+});
+
+test("Dreams retains Quests and Goals paging but removes the Rewards screen and navigation", () => {
+  const journey = source("components/home/screens/kid-journey-screen.tsx");
+  assert.match(journey, /id: "quests", label: "Quests"/);
+  assert.match(journey, /id: "goals", label: "Goals"/);
+  assert.doesNotMatch(journey, /rewards|Rewards/);
+  assert.match(journey, /\(journeySections.length - 1\) \/ 2/);
+  assert.match(journey, /initialTab=\{initialGoalTab\}/);
+  assert.match(journey, /initialGoalId=\{initialGoalId\}/);
+  assert.equal(
+    existsSync(
+      new URL(
+        "../src/components/home/screens/kid-rewards-screen.tsx",
+        import.meta.url,
+      ),
+    ),
+    false,
+  );
+  assert.doesNotMatch(
+    source("components/home/home-app-shell.tsx"),
+    /\/wallet\/kid\/rewards/,
+  );
+  assert.match(
+    source("app/wallet/kid/rewards/page.tsx"),
+    /redirect\(kidGoalsHref\(\{ tab: "ready" \}\)\)/,
+  );
+  assert.match(
+    source("app/wallet/kid/journey/page.tsx"),
+    /section === "rewards"\)\s*redirect\(kidGoalsHref\(\{ tab: "ready", goalId: goal \}\)\)/,
+  );
+});
+
+test("Home and approved requests open the correct goal; feedback returns to its current status tab", () => {
+  assert.match(
+    source("components/home/screens/kid-home-screen.tsx"),
+    /router.push\(kidGoalsHref\(\{ goalId: activeGoal.id \}\)\)/,
+  );
+  assert.match(
+    source("components/home/goal-request-sheet.tsx"),
+    /href=\{kidGoalsHref\(\{ goalId: request.goal\?\.id \}\)\}/,
+  );
+  const goals = source("components/home/screens/kid-goals-screen.tsx");
+  assert.match(goals, /initialGoalId \?\?/);
+  assert.match(goals, /const nextTab = selected\?\.tab \?\? tab/);
+  assert.match(goals, /setTab\(nextTab\);\s*syncLocation\(nextTab\)/);
+  assert.match(goals, /requestSent && selectedGoal && selected\?\.waiting/);
+  assert.match(goals, /<KidIllustration name="mail_sparkle"/);
+  assert.match(goals, /<IntentStatus operation=\{operation\} busy=\{busy\}/);
+  assert.match(
+    goals,
+    /stars=\{progress\}\s*pending=\{waiting\}\s*completed=\{completed\}/,
+  );
+  assert.match(goals, /previousIds\.includes\(item.id\)/);
+  assert.doesNotMatch(goals, /setInterval|refetchInterval/);
 });

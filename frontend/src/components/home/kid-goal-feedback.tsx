@@ -54,7 +54,6 @@ export function KidGoalFeedback({
         <KidIllustration name="clock" alt="" size={30} />
         <span>
           <strong>Waiting for parent</strong>
-          <small>Your {state.reservedStars} Stars are reserved</small>
         </span>
       </div>
     );

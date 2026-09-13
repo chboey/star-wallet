@@ -1,0 +1,72 @@
+.confirm-step .center-copy.heading-only {
+  margin-bottom: 14px;
+}
+
+.confirm-step .step-body > .artwork {
+  margin-bottom: clamp(26px, 3dvh, 32px);
+}
+
+.checklist-card,
+.summary-card {
+  overflow: hidden;
+  border: 1px solid var(--lavender-line);
+  border-radius: 12px;
+  background: white;
+}
+
+.check-row {
+  min-height: 47px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #e5e1f7;
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.check-row:last-child {
+  border-bottom: 0;
+}
+
+.check-row > span {
+  width: 23px;
+  height: 23px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: var(--purple);
+}
+
+.check-row.active {
+  background: #faf8ff;
+}
+
+.check-row strong {
+  font-size: 12px;
+}
+
+.copy-link {
+  max-width: 100%;
+  margin: 8px auto 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handoff-copy {
+  margin: 4px 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.acceptance-copy {
+  min-height: 42px;
+  margin: 0 0 8px;
+}

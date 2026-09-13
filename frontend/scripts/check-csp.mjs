@@ -47,7 +47,14 @@ try {
     });
   });
   const nonces = new Set();
-  for (const path of ["/security-test-missing-page"]) {
+  for (const path of [
+    "/",
+    "/onboarding",
+    "/wallet/kid",
+    "/wallet/profile",
+    "/wallet/kid",
+    "/security-test-missing-page",
+  ]) {
     const response = await fetch(`${origin}${path}`, {
       headers: {
         "x-nonce": "attacker-nonce",

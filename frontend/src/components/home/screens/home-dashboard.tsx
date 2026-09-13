@@ -1,34 +1,37 @@
 "use client";
 
 import { ChevronRight, ListChecks, Star } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Hash } from "viem";
-import { availableStars, displayEnsName, formatUsd18 } from "@/lib/star-format";
-import type { StarRequest } from "@/lib/quest-types";
-import { GoalRequestSheet } from "../goal-request-sheet";
+import {
+  availableStars,
+  displayEnsName,
+  formatTokenAmount,
+} from "@/lib/star-format";
 import {
   HomeIllustration,
   SectionEmptyState,
   SectionTitle,
   StarValue,
 } from "../home-ui";
-import { useStarData } from "../star-data-provider";
-import { presentRecentActivities } from "../star-activity";
-import { ParentActivitySheet } from "../parent-activity-sheet";
 import {
   ParentRewardStarsSheet,
   type ParentChildChoice,
   type RewardPanel,
 } from "../parent-action-sheets";
-import { ParentActionSheet } from "../parent-action-sheet";
-import { ParentAttentionList } from "../parent-attention-list";
-import { ParentQuestInboxSheet } from "../quest-inbox";
-import { RequestReviewSheet } from "../request-review-sheet";
-import { RewardApprovalSuccess } from "../reward-approval-feedback";
-import { useParentAttention } from "../use-parent-attention";
+import { ParentActivitySheet } from "../parent-activity-sheet";
+import { isVisibleActivity, presentRecentActivities } from "../star-activity";
+import { useStarData } from "../star-data-provider";
 import { WalletActivitySheet } from "../wallet-activity-sheet";
+import { ParentQuestInboxSheet } from "../quest-inbox";
+import { GoalRequestSheet } from "../goal-request-sheet";
+import { useParentAttention } from "../use-parent-attention";
+import { ParentAttentionList } from "../parent-attention-list";
+import { RequestReviewSheet } from "../request-review-sheet";
+import type { StarRequest } from "@/lib/quest-types";
+import { ParentActionSheet } from "../parent-action-sheet";
+import { RewardApprovalSuccess } from "../reward-approval-feedback";
 
 export function HomeDashboard({
   initialQuestInboxOpen = false,
@@ -41,12 +44,13 @@ export function HomeDashboard({
 } = {}) {
   const router = useRouter();
   const { family, familyName, portfolio } = useStarData();
+  const activities = (family?.activities ?? []).filter(isVisibleActivity);
   const attention = useParentAttention();
-  const [activityOpen, setActivityOpen] = useState(false);
-  const [walletActivityOpen, setWalletActivityOpen] = useState(false);
   const [rewardPanel, setRewardPanel] = useState<RewardPanel | null>(
     initialRewardPanel ?? null,
   );
+  const [walletActivityOpen, setWalletActivityOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [questInboxOpen, setQuestInboxOpen] = useState(initialQuestInboxOpen);
   const [attentionRequest, setAttentionRequest] = useState<StarRequest | null>(
     null,
@@ -65,170 +69,202 @@ export function HomeDashboard({
       id: child.id,
       name: displayEnsName(child.ensName, "Child"),
     }));
-  const activities = family?.activities ?? [];
   const recentActivities = family
     ? presentRecentActivities(activities, family)
     : [];
+  const usdc = formatTokenAmount(
+    portfolio?.parentWallet?.usdc.amount,
+    portfolio?.parentWallet?.usdc.decimals ?? 6,
+    2,
+  );
+  const weth = formatTokenAmount(
+    portfolio?.parentWallet?.weth.amount,
+    portfolio?.parentWallet?.weth.decimals ?? 18,
+    6,
+  );
 
   return (
     <div className="wallet-screen home-dashboard">
       <header className="dashboard-header">
-        <HomeIllustration name="dad" alt="Parent profile" size={58} />
+        <HomeIllustration name="dad" alt="" size={58} />
         <div>
           <p>
-            Good morning
+            Welcome back!
             <HomeIllustration
               className="greeting-sun"
               name="sunshine"
               alt=""
-              size={32}
+              size={18}
             />
           </p>
-          <h1>{familyName}</h1>
+          {family && <button type="button">{familyName}&apos;s Family</button>}
         </div>
       </header>
 
-      <button
-        className="dashboard-balance-card"
-        type="button"
-        onClick={() => setWalletActivityOpen(true)}
-      >
-        <div>
-          <span>Family savings</span>
-          <strong>
-            {formatUsd18(portfolio?.currentPortfolioValue.amount)}
-          </strong>
-          <small>USDC and WETH</small>
+      {family && portfolio ? (
+        <section className="family-wallet-card">
+          <button
+            className="wallet-activity-trigger"
+            type="button"
+            aria-label={`Open wallet activity for ${usdc} USDC and ${weth} WETH`}
+            onClick={() => setWalletActivityOpen(true)}
+          />
+          <div>
+            <span>Your wallet</span>
+            <strong>
+              {usdc} <small>USDC</small>
+            </strong>
+            <p>+ {weth} WETH</p>
+          </div>
+          <span className="wallet-card-art">
+            <HomeIllustration name="wallet" alt="" size={96} />
+          </span>
+        </section>
+      ) : (
+        <section>
+          <SectionEmptyState />
+        </section>
+      )}
+
+      <section>
+        <SectionTitle>Children</SectionTitle>
+        <div className="children-overview-list">
+          {(family?.children ?? []).map((child) => {
+            const available = availableStars(child);
+            return (
+              <article className="child-overview-card" key={child.id}>
+                <HomeIllustration name="girl" alt="" size={72} />
+                <div className="child-overview-main">
+                  <div className="child-identity">
+                    <strong>{displayEnsName(child.ensName, "Child")}</strong>
+                    <span>{child.active ? "Active" : "Inactive"}</span>
+                  </div>
+                </div>
+                <div className="available-stars">
+                  <span className="available-stars-label">Available Stars</span>
+                  <span className="available-stars-value">
+                    <strong>{available.toString()}</strong>
+                    <Star size={16} fill="currentColor" aria-hidden="true" />
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+          {!family?.children.length && <SectionEmptyState />}
         </div>
-        <HomeIllustration
-          name="jar_of_stars"
-          alt="A jar of Stars"
-          size={108}
-          collection="kid"
-        />
-      </button>
-
-      <SectionTitle
-        action={
-          <Link href="/wallet/profiles">
-            Switch profile <ChevronRight size={15} />
-          </Link>
-        }
-      >
-        Family
-      </SectionTitle>
-
-      <section className="dashboard-children-list">
-        {(family?.children ?? []).map((child) => (
-          <article className="dashboard-child-card" key={child.id}>
-            <HomeIllustration name="girl" alt="" size={68} />
-            <div>
-              <strong>{displayEnsName(child.ensName, "Child")}</strong>
-              <span>{child.active ? "Active" : "Inactive"}</span>
-            </div>
-            <StarValue>{availableStars(child).toString()}</StarValue>
-          </article>
-        ))}
-        {!family?.children.length && <SectionEmptyState />}
       </section>
 
-      <SectionTitle>Needs attention ({attention.items.length})</SectionTitle>
-      <ParentAttentionList
-        items={attention.items}
-        childProfiles={family?.children ?? []}
-        loading={attention.loading}
-        refreshing={attention.refreshing}
-        error={attention.error}
-        onRetry={() => void attention.refresh()}
-        onOpen={(item) => {
-          if (item.kind === "goal") setGoalRequestId(item.request.id);
-          if (item.kind === "stars" || item.kind === "quest") {
-            setRewardPanel(null);
-            setQuestInboxOpen(false);
-            setAttentionRequest(item.request);
-          }
-        }}
-      />
+      <section className="parent-quick-actions" aria-label="Parent actions">
+        <button
+          type="button"
+          onClick={() => setRewardPanel("reward")}
+          disabled={!family?.vault}
+        >
+          <span className="parent-quick-action-icon parent-quick-action-star">
+            <Star size={20} fill="currentColor" />
+          </span>
+          <span>
+            <strong>Reward Stars</strong>
+            <small>Celebrate a win</small>
+          </span>
+          <ChevronRight size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setQuestInboxOpen(true)}
+          disabled={!family?.vault}
+        >
+          <span className="parent-quick-action-icon">
+            <ListChecks size={21} />
+          </span>
+          <span>
+            <strong>Quests</strong>
+            <small>Assign and review</small>
+          </span>
+          <ChevronRight size={16} />
+        </button>
+      </section>
 
-      <SectionTitle
-        action={
-          <button type="button" onClick={() => setActivityOpen(true)}>
-            See all <ChevronRight size={15} />
-          </button>
-        }
-      >
-        Recent activity
-      </SectionTitle>
-      {recentActivities.length ? (
-        <section className="dashboard-activity-list">
-          {recentActivities.map((row) => (
-            <article key={row.id}>
+      <section>
+        <SectionTitle>Needs attention</SectionTitle>
+        <ParentAttentionList
+          items={attention.items}
+          childProfiles={family?.children ?? []}
+          loading={attention.loading}
+          refreshing={attention.refreshing}
+          error={attention.error}
+          onRetry={() => void attention.refresh()}
+          onOpen={(item) => {
+            if (item.kind === "goal") setGoalRequestId(item.request.id);
+            if (item.kind === "stars" || item.kind === "quest") {
+              setRewardPanel(null);
+              setQuestInboxOpen(false);
+              setAttentionRequest(item.request);
+            }
+          }}
+        />
+      </section>
+
+      <section>
+        <SectionTitle
+          action={
+            activities.length ? (
+              <button
+                className="section-see-all"
+                type="button"
+                onClick={() => setActivityOpen(true)}
+              >
+                See all <ChevronRight size={14} />
+              </button>
+            ) : undefined
+          }
+        >
+          Recent activity
+        </SectionTitle>
+        {recentActivities.length ? (
+          recentActivities.map((row) => (
+            <div className="activity-row" key={row.id}>
               <HomeIllustration
                 name={row.homeIllustration}
                 collection={row.homeIllustrationCollection}
                 alt=""
-                size={42}
+                size={48}
               />
-              <span>{row.title}</span>
-              <strong>
-                {row.amount ?? ""} {row.currency ?? ""}
-              </strong>
-            </article>
-          ))}
-        </section>
-      ) : (
-        <SectionEmptyState />
-      )}
+              <span>
+                <strong>{row.title}</strong>
+                <small>{row.detail}</small>
+              </span>
+              {row.amount &&
+                (row.currency === "STAR" ? (
+                  <StarValue compact>{row.amount}</StarValue>
+                ) : (
+                  <span className="activity-row-token-amount">
+                    <strong>{row.amount}</strong>
+                    <small>{row.currency}</small>
+                  </span>
+                ))}
+            </div>
+          ))
+        ) : (
+          <SectionEmptyState />
+        )}
+      </section>
 
-      <Link className="dashboard-action-card" href="/wallet/family">
-        <span>
-          <ListChecks size={20} />
-        </span>
-        <div>
-          <strong>Open family overview</strong>
-          <small>See balances, savings and children</small>
-        </div>
-        <ChevronRight size={18} />
-      </Link>
-      <button
-        className="dashboard-action-card"
-        type="button"
-        disabled={!family?.active || !family.vault || children.length === 0}
-        onClick={() => setQuestInboxOpen(true)}
-      >
-        <span>
-          <ListChecks size={20} />
-        </span>
-        <div>
-          <strong>Quests</strong>
-          <small>Assign and review</small>
-        </div>
-        <ChevronRight size={18} />
-      </button>
-      <button
-        className="dashboard-action-card"
-        type="button"
-        disabled={!family?.vault || children.length === 0}
-        onClick={() => setRewardPanel("reward")}
-      >
-        <span>
-          <Star size={20} fill="currentColor" />
-        </span>
-        <div>
-          <strong>Reward Stars</strong>
-          <small>Celebrate a child&apos;s progress</small>
-        </div>
-        <ChevronRight size={18} />
-      </button>
       {rewardPanel !== null && (
         <ParentRewardStarsSheet
           childChoices={children}
           initialPanel={rewardPanel}
-          onClose={() => setRewardPanel(null)}
+          onClose={() => {
+            setRewardPanel(null);
+          }}
         />
       )}
       {questInboxOpen && (
-        <ParentQuestInboxSheet onClose={() => setQuestInboxOpen(false)} />
+        <ParentQuestInboxSheet
+          onClose={() => {
+            setQuestInboxOpen(false);
+          }}
+        />
       )}
       {attentionRequest && (
         <RequestReviewSheet
@@ -244,11 +280,11 @@ export function HomeDashboard({
           onClose={() => setGoalRequestId(null)}
         />
       )}
-      {activityOpen && (
-        <ParentActivitySheet onClose={() => setActivityOpen(false)} />
-      )}
       {walletActivityOpen && (
         <WalletActivitySheet onClose={() => setWalletActivityOpen(false)} />
+      )}
+      {activityOpen && (
+        <ParentActivitySheet onClose={() => setActivityOpen(false)} />
       )}
       {rewardApprovalOpen && (
         <ParentActionSheet

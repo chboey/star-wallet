@@ -1,6 +1,7 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   createContext,
   type ReactNode,
@@ -12,39 +13,44 @@ import {
 } from "react";
 import { useAccount } from "wagmi";
 import {
-  emptyDraft,
   readDraft,
+  emptyDraft,
   validAddress,
   type OnboardingDraft,
 } from "@/lib/onboarding";
 import {
+  StarApiError,
   starApi,
   type StarChild,
   type StarFamily,
   type StarPortfolio,
 } from "@/lib/star-api";
+import { displayEnsName } from "@/lib/star-format";
+import { withGoalMetadata, type GoalRequest } from "@/lib/goal-requests";
+import {
+  starReadOptions,
+  familyDiscoveryStaleTime,
+  walletPageReads,
+  matchesWalletReads,
+  type WalletRead,
+  walletRefreshFilter,
+} from "@/lib/wallet-refresh";
 import { childFromFamily } from "@/lib/family-child";
 import {
   applyGoalContributionSnapshots,
   goalContributionConfirmationsKey,
   type GoalContributionSnapshot,
 } from "@/lib/goal-contributions";
-import { withGoalMetadata, type GoalRequest } from "@/lib/goal-requests";
-import { displayEnsName } from "@/lib/star-format";
-import {
-  matchesWalletReads,
-  starReadOptions,
-  type WalletRead,
-} from "@/lib/wallet-refresh";
 import { existingFamilyForWallet } from "@/lib/onboarding-entry";
-import {
-  SELECTED_CHILD_KEY,
-  needsFamilyOnboarding,
-  selectFamilyId,
-  walletContext,
-} from "@/lib/wallet-context";
-import { FullScreenLoader } from "./home-ui";
 import { useReadOnEntry } from "./use-read-on-entry";
+import { FullScreenLoader } from "./home-ui";
+import {
+  CHILD_LINK_KEY,
+  SELECTED_CHILD_KEY,
+  walletContext,
+  selectFamilyId,
+  needsFamilyOnboarding,
+} from "@/lib/wallet-context";
 
 type StarDataContextValue = {
   hydrated: boolean;
@@ -56,6 +62,7 @@ type StarDataContextValue = {
   childName: string;
   loading: boolean;
   needsOnboarding: boolean;
+  refreshing: boolean;
   refreshRequested: boolean;
   error: Error | null;
   goalRequests: GoalRequest[];
@@ -71,27 +78,54 @@ const StarDataContext = createContext<StarDataContextValue | null>(null);
 
 export function StarDataProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const section = searchParams.get("section");
+  const pageReads = walletPageReads(pathname, section);
+  const pageEntry = `${pathname}:${section ?? ""}`;
+  // Keep existing screens and form state mounted while cached reads refresh.
+  // Include inbox/activity queries, not just the three main wallet reads.
+  const refreshing = useIsFetching(walletRefreshFilter) > 0;
+  const [requestedRefreshes, setRequestedRefreshes] = useState(0);
+  const refreshRequested = requestedRefreshes > 0;
   const { address, isReconnecting } = useAccount();
   const [draft, setDraft] = useState<OnboardingDraft | null>(null);
   const [selectedChildWallet, setSelectedChildWallet] = useState("");
-  const [refreshes, setRefreshes] = useState(0);
+  const [childLink, setChildLink] = useState("");
+  const [explicitChildLink, setExplicitChildLink] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      const saved = readDraft();
-      setDraft(saved);
+      const savedDraft = readDraft();
+      const requestedChild =
+        new URLSearchParams(window.location.search).get("child") ?? "";
+      const linkedChild = validAddress(requestedChild)
+        ? requestedChild
+        : (window.sessionStorage.getItem(CHILD_LINK_KEY) ?? "");
+      if (validAddress(linkedChild)) {
+        setExplicitChildLink(validAddress(requestedChild));
+        setChildLink(linkedChild);
+        window.sessionStorage.setItem(CHILD_LINK_KEY, linkedChild);
+      }
+      setDraft(savedDraft);
       setSelectedChildWallet(
-        window.sessionStorage.getItem(SELECTED_CHILD_KEY) ?? saved.childWallet,
+        (validAddress(linkedChild) ? linkedChild : null) ??
+          window.sessionStorage.getItem(SELECTED_CHILD_KEY) ??
+          savedDraft.childWallet,
       );
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  const { discoveryAddress, storedFamilyId } = walletContext(
+  const { storedFamilyId, discoveryAddress } = walletContext(
     address,
     draft,
-    "",
+    childLink,
+    explicitChildLink,
   );
+  const linkedChildDiscovery =
+    validAddress(childLink) &&
+    discoveryAddress.toLowerCase() === childLink.toLowerCase();
   const discoveryReady = draft !== null && !isReconnecting;
   const familiesQuery = useQuery({
     ...starReadOptions,
@@ -102,58 +136,52 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
       existingFamilyForWallet(response, discoveryAddress, draft ?? emptyDraft);
       return response;
     },
-    enabled: discoveryReady && validAddress(discoveryAddress),
+    staleTime: (query) => familyDiscoveryStaleTime(query.state.data),
+    refetchOnMount: true,
+    enabled:
+      discoveryReady && validAddress(discoveryAddress) && !linkedChildDiscovery,
   });
-  useReadOnEntry(
-    ["star", "families", discoveryAddress.toLowerCase()],
-    discoveryReady && validAddress(discoveryAddress),
-    discoveryAddress,
-  );
-
-  const familyId = selectFamilyId(storedFamilyId, familiesQuery.data?.families);
+  const discoverChild =
+    validAddress(discoveryAddress) &&
+    (linkedChildDiscovery ||
+      (familiesQuery.isSuccess &&
+        !familiesQuery.isFetching &&
+        !familiesQuery.data.families.length));
+  const childDiscoveryQuery = useQuery({
+    ...starReadOptions,
+    queryKey: ["star", "child", "discovery", discoveryAddress.toLowerCase()],
+    queryFn: ({ signal }) => starApi.fullChild(discoveryAddress, { signal }),
+    staleTime: 1_000,
+    refetchOnMount: true,
+    enabled: discoveryReady && discoverChild,
+  });
+  const familyId =
+    !discoveryReady ||
+    (!linkedChildDiscovery && familiesQuery.isFetching) ||
+    (discoverChild && childDiscoveryQuery.isFetching)
+      ? null
+      : selectFamilyId(
+          storedFamilyId,
+          !linkedChildDiscovery && familiesQuery.isSuccess
+            ? familiesQuery.data.families
+            : undefined,
+          discoverChild && childDiscoveryQuery.isSuccess
+            ? childDiscoveryQuery.data?.family?.id
+            : undefined,
+        );
   const familyQuery = useQuery({
     ...starReadOptions,
     queryKey: ["star", "family", familyId],
     queryFn: ({ signal }) => starApi.fullFamily(familyId!, { signal }),
     enabled: familyId !== null,
   });
-  useReadOnEntry(
-    ["star", "family", familyId],
-    familyId !== null,
-    familyId ?? "",
-  );
-
+  useReadOnEntry(["star", "family", familyId], familyId !== null, pageEntry);
   const contributionConfirmations = useQuery<GoalContributionSnapshot[]>({
     ...starReadOptions,
     queryKey: goalContributionConfirmationsKey(familyId),
     enabled: false,
     queryFn: async () => [],
   });
-
-  const goalRequestsQuery = useQuery({
-    ...starReadOptions,
-    queryKey: ["star", "family", familyId, "goal-requests"],
-    queryFn: ({ signal }) => starApi.allGoalRequests(familyId!, { signal }),
-    enabled: familyId !== null,
-  });
-  useReadOnEntry(
-    ["star", "family", familyId, "goal-requests"],
-    familyId !== null,
-    familyId ?? "",
-  );
-
-  const portfolioQuery = useQuery({
-    ...starReadOptions,
-    queryKey: ["star", "portfolio", familyId],
-    queryFn: ({ signal }) => starApi.portfolio(familyId!, { signal }),
-    enabled: familyId !== null,
-  });
-  useReadOnEntry(
-    ["star", "portfolio", familyId],
-    familyId !== null,
-    familyId ?? "",
-  );
-
   const family = useMemo(
     () =>
       applyGoalContributionSnapshots(
@@ -162,18 +190,43 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
       ),
     [familyQuery.data, contributionConfirmations.data],
   );
-  const selectedChild = useMemo(() => {
+  const goalRequestsQuery = useQuery({
+    ...starReadOptions,
+    queryKey: ["star", "family", familyId, "goal-requests"],
+    queryFn: ({ signal }) => starApi.allGoalRequests(familyId!, { signal }),
+    enabled: familyId !== null && pageReads.goals,
+  });
+  useReadOnEntry(
+    ["star", "family", familyId, "goal-requests"],
+    familyId !== null && pageReads.goals,
+    pageEntry,
+  );
+  const selectedChildSummary = useMemo(() => {
     if (!family?.children.length) return null;
-    const selected = selectedChildWallet.toLowerCase();
+    const requested = selectedChildWallet.toLowerCase();
     return (
-      family.children.find((item) => item.wallet.toLowerCase() === selected) ??
+      family.children.find(
+        (item) => item.wallet.toLowerCase() === address?.toLowerCase(),
+      ) ??
+      family.children.find((item) => item.wallet.toLowerCase() === requested) ??
       family.children.find((item) => item.active) ??
       family.children[0]
     );
-  }, [family, selectedChildWallet]);
+  }, [address, family, selectedChildWallet]);
+  const portfolioQuery = useQuery({
+    ...starReadOptions,
+    queryKey: ["star", "portfolio", familyId],
+    queryFn: ({ signal }) => starApi.portfolio(familyId!, { signal }),
+    enabled: familyId !== null && pageReads.portfolio,
+  });
+  useReadOnEntry(
+    ["star", "portfolio", familyId],
+    familyId !== null && pageReads.portfolio,
+    pathname,
+  );
   const child = useMemo(
-    () => childFromFamily(family, selectedChild),
-    [family, selectedChild],
+    () => childFromFamily(family, selectedChildSummary),
+    [family, selectedChildSummary],
   );
 
   const selectChild = useCallback((wallet: string) => {
@@ -184,7 +237,8 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(
     async (reads?: readonly WalletRead[]) => {
-      setRefreshes((count) => count + 1);
+      // Deliberate retry/refresh only, restricted to this family's mounted reads.
+      setRequestedRefreshes((count) => count + 1);
       try {
         await queryClient.invalidateQueries(
           {
@@ -193,27 +247,47 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
                 query.queryKey,
                 familyId,
                 reads,
-                child?.id,
+                undefined,
                 discoveryAddress,
               ),
           },
           { cancelRefetch: false },
         );
       } finally {
-        setRefreshes((count) => count - 1);
+        setRequestedRefreshes((count) => count - 1);
       }
     },
-    [queryClient, familyId, child?.id, discoveryAddress],
+    [queryClient, familyId, discoveryAddress],
   );
 
+  const discoveryError =
+    familyId === null &&
+    discoverChild &&
+    !(
+      childDiscoveryQuery.error instanceof StarApiError &&
+      childDiscoveryQuery.error.code === "CHILD_NOT_FOUND"
+    )
+      ? childDiscoveryQuery.error
+      : null;
+  const familyDiscoveryError =
+    familyId === null && !linkedChildDiscovery ? familiesQuery.error : null;
   const error = (familyQuery.error ??
-    familiesQuery.error ??
-    portfolioQuery.error) as Error | null;
+    familyDiscoveryError ??
+    discoveryError ??
+    (pageReads.portfolio ? portfolioQuery.error : null)) as Error | null;
+  const discoveryLoading =
+    validAddress(discoveryAddress) &&
+    familyId === null &&
+    ((!linkedChildDiscovery &&
+      (familiesQuery.isPending || familiesQuery.isFetching)) ||
+      (discoverChild &&
+        (childDiscoveryQuery.isPending || childDiscoveryQuery.isFetching)));
   const loading =
     draft === null ||
     isReconnecting ||
-    (validAddress(discoveryAddress) && familiesQuery.isPending) ||
-    (familyId !== null && (familyQuery.isPending || portfolioQuery.isPending));
+    discoveryLoading ||
+    (familyId !== null && familyQuery.isPending) ||
+    (familyId !== null && pageReads.portfolio && portfolioQuery.isPending);
   const value = useMemo<StarDataContextValue>(
     () => ({
       hydrated: draft !== null,
@@ -251,11 +325,21 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
       goalRequests: goalRequestsQuery.data?.requests ?? [],
       goalRequestsSupported: goalRequestsQuery.data?.supported,
       goalRequestsAddress: goalRequestsQuery.data?.goalsAddress ?? null,
-      goalRequestsLoading: goalRequestsQuery.isPending,
-      goalRequestsError: goalRequestsQuery.error,
+      goalRequestsLoading: pageReads.goals && goalRequestsQuery.isPending,
+      goalRequestsError: pageReads.goals ? goalRequestsQuery.error : null,
       portfolio: portfolioQuery.data ?? null,
-      familyName: displayEnsName(family?.ensName, "Your family"),
-      childName: displayEnsName(child?.ensName, "Child"),
+      familyName: displayEnsName(
+        family?.ensName,
+        family?.id === draft?.familyId
+          ? draft?.familyName || "Your family"
+          : "Your family",
+      ),
+      childName: displayEnsName(
+        child?.ensName,
+        child?.wallet.toLowerCase() === draft?.childWallet.toLowerCase()
+          ? draft?.childName || "Child"
+          : "Child",
+      ),
       loading,
       needsOnboarding: needsFamilyOnboarding({
         hydrated: draft !== null,
@@ -264,25 +348,28 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
         familyId,
         childCount: family?.childCount,
       }),
-      refreshRequested: refreshes > 0,
+      refreshing,
+      refreshRequested,
       error,
       selectChild,
       refresh,
     }),
     [
-      draft,
-      familyId,
-      family,
       child,
-      goalRequestsQuery.data,
-      goalRequestsQuery.isPending,
-      goalRequestsQuery.error,
-      portfolioQuery.data,
-      loading,
+      draft,
       error,
-      refreshes,
-      selectChild,
+      family,
+      familyId,
+      loading,
+      refreshing,
+      refreshRequested,
+      goalRequestsQuery.data,
+      goalRequestsQuery.error,
+      goalRequestsQuery.isPending,
+      pageReads.goals,
+      portfolioQuery.data,
       refresh,
+      selectChild,
     ],
   );
 
@@ -301,17 +388,20 @@ export function useStarData(): StarDataContextValue {
 }
 
 export function StarDataBoundary({ children }: { children: ReactNode }) {
-  const { loading, error, needsOnboarding, refresh } = useStarData();
-  if (loading || needsOnboarding) return <FullScreenLoader />;
-  if (error)
+  const data = useStarData();
+  if (data.loading || data.needsOnboarding) {
+    return <FullScreenLoader />;
+  }
+  if (data.error) {
     return (
       <div className="star-data-state" role="alert">
-        <strong>Couldn&apos;t load your family.</strong>
-        <span>{error.message}</span>
-        <button type="button" onClick={() => void refresh()}>
+        <strong>Couldn&apos;t load Star Wallet</strong>
+        <span>{data.error.message}</span>
+        <button type="button" onClick={() => void data.refresh()}>
           Try again
         </button>
       </div>
     );
+  }
   return children;
 }

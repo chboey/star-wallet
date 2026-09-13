@@ -19,9 +19,9 @@ export function OnchainDetailsSheet({
   onClose: () => void;
   canManage?: boolean;
 }) {
-  const { family } = useStarData();
+  const { family, refreshing } = useStarData();
   const live = useAquaPosition();
-  const busy = live.isFetching;
+  const busy = refreshing || live.isFetching;
   const [closingPosition, setClosingPosition] =
     useState<SelectedAquaPosition | null>(null);
   const [addingPosition, setAddingPosition] =

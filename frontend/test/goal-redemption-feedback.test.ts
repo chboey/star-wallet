@@ -78,7 +78,10 @@ test("the button keeps spinning if indexed state arrives before the request fini
 test("waiting goals show reserved Stars and never offer a duplicate claim", () => {
   const html = render(kidGoalState(goal, child, true)!);
   assert.match(html, /Waiting for parent/);
-  assert.match(html, /Your 10 Stars are reserved/);
+  assert.match(
+    html,
+    /illustrations%2Fkid%2Fclock\.png|illustrations\/kid\/clock\.png/,
+  );
   assert.doesNotMatch(html, /<button|Ask parent to redeem|Need .* more Stars/);
 });
 

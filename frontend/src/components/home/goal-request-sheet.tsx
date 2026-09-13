@@ -14,7 +14,9 @@ import { useStarIntents } from "./use-star-intents";
 import { ParentTransactionDetails } from "./parent-transaction-details";
 
 type GoalRequestAction =
-  "approveGoalRequest" | "rejectGoalRequest" | "cancelGoalRequest";
+  | "approveGoalRequest"
+  | "rejectGoalRequest"
+  | "cancelGoalRequest";
 
 export function GoalRequestSheet({
   requestId,

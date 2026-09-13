@@ -115,9 +115,7 @@ export function RequestReviewContent({
         <div
           className="request-review-success-status"
           role="status"
-          aria-label={
-            request.quest ? "Quest approved" : "Star request approved"
-          }
+          aria-label={request.quest ? "Quest approved" : "Star request approved"}
         >
           <KidIllustration name="purple_tick" alt="" size={144} />
           <p>

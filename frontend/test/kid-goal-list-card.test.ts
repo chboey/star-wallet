@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -52,7 +53,8 @@ test("ongoing goals retain their progress and pending-parent feedback", () => {
   assert.match(ongoing, /4 \/ 10/);
   const pending = render({ goal: activeGoal, stars: 10n, pending: true });
   assert.match(pending, /Waiting for parent/);
-  assert.doesNotMatch(pending, /kid-mini-progress/);
+  assert.match(pending, /lucide-chevron-right/);
+  assert.doesNotMatch(pending, /lucide-clock|kid-mini-progress/);
   assert.match(render({ goal: activeGoal, stars: 15n }), /Ready to claim/);
 });
 
@@ -66,6 +68,19 @@ test("the simplified completed card still opens the selected goal", () => {
     },
   }).props.onClick();
   assert.equal(opened, true);
+  const source = readFileSync(
+    new URL(
+      "../src/components/home/screens/kid-goals-screen.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(source, /<KidGoalListCard/);
+  assert.match(source, /goal=\{goal\}/);
+  assert.match(
+    source,
+    /onOpen=\{\(\) => \{\s*resetOperation\(\);\s*if \(tab === "ongoing"\) setContributionGoalId\(goal.id\);\s*else setSelectedGoalId\(goal.id\)/,
+  );
 });
 
 test("an approved redemption keeps the card minimal while goal metadata catches up", () => {

@@ -15,6 +15,7 @@ export function useParentAttention() {
     goalRequestsError,
     goalRequestsLoading,
     loading,
+    refreshing,
     error,
     refresh,
   } = useStarData();
@@ -39,7 +40,7 @@ export function useParentAttention() {
       loading ||
       Boolean(familyId && (requests.isPending || goalRequestsLoading)),
     error: error ?? goalRequestsError ?? requests.error,
-    refreshing: requests.isFetching,
+    refreshing: refreshing || requests.isFetching,
     refresh: () => refresh(["family", "goals", "attention"]),
   };
 }

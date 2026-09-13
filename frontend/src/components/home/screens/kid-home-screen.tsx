@@ -1,62 +1,75 @@
 "use client";
 
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Plus, Star } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { availableStars } from "@/lib/star-format";
 import {
-  goalAllocatedStars,
-  kidGoalsHref,
-  kidGoalState,
-} from "@/lib/kid-goals";
+  availableStars,
+  goalIllustration,
+  safeBigInt,
+} from "@/lib/star-format";
+import { KidActivitySheet } from "../kid-activity-sheet";
+import { KidIllustration } from "../kid-ui";
+import { SectionEmptyState, SectionTitle, StarValue } from "../home-ui";
 import {
-  HomeIllustration,
-  SectionEmptyState,
-  SectionTitle,
-  StarValue,
-} from "../home-ui";
-import { ActionStatus } from "../action-status";
+  isChildActivity,
+  isVisibleActivity,
+  presentRecentActivities,
+} from "../star-activity";
+import { useStarData } from "../star-data-provider";
+import { KidAddGoalCard } from "../kid-add-goal-card";
 import { GoalRequestSheet } from "../goal-request-sheet";
 import { goalIconAsset } from "@/lib/goal-requests";
-import { KidIllustration } from "../kid-ui";
-import { KidAddGoalCard } from "../kid-add-goal-card";
-import { useStarData } from "../star-data-provider";
-import { isChildActivity, presentRecentActivities } from "../star-activity";
-import { KidActivitySheet } from "../kid-activity-sheet";
+import {
+  kidGoalsHref,
+  kidGoalState,
+  goalAllocatedStars,
+} from "@/lib/kid-goals";
 import { GoalContributionSheet } from "../goal-contribution-sheet";
+import { ActionStatus } from "../action-status";
 import { KidGoalRequestScreen } from "./kid-goal-request-screen";
 
 export function KidHomeScreen() {
   const router = useRouter();
   const {
+    family,
     child,
     childName,
-    family,
     goalRequests,
     goalRequestsLoading,
     goalRequestsError,
     refresh,
   } = useStarData();
+  const activities = (family?.activities ?? []).filter(isVisibleActivity);
   const [activityOpen, setActivityOpen] = useState(false);
   const [addGoalOpen, setAddGoalOpen] = useState(false);
-  const [requestId, setRequestId] = useState<string | null>(null);
   const [contributionGoalId, setContributionGoalId] = useState<string | null>(
     null,
   );
-  const activeGoal = child?.goals?.find((item) => item.status === "ACTIVE");
   const contributionGoal = child?.goals?.find(
-    (item) => item.id === contributionGoalId,
+    (goal) => goal.id === contributionGoalId,
   );
-  const allocated = activeGoal ? goalAllocatedStars(activeGoal) : 0n;
-  const cost = BigInt(activeGoal?.starCost ?? 0);
-  const progress = cost ? Number((allocated * 100n) / cost) : 0;
-  const pendingGoalRequests = goalRequests.filter(
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const pendingGoals = goalRequests.filter(
     (request) => request.child.id === child?.id && request.status === "PENDING",
   );
+  const latestGoalRequest = goalRequests.find(
+    (request) => request.child.id === child?.id,
+  );
+  const stars = child ? availableStars(child) : 0n;
+  const activeGoal =
+    child?.goals?.find((goal) => goal.status === "ACTIVE") ??
+    family?.goals.find(
+      (goal) => goal.child?.id === child?.id && goal.status === "ACTIVE",
+    );
+  const goalTarget = safeBigInt(activeGoal?.starCost);
+  const goalProgress = activeGoal ? goalAllocatedStars(activeGoal) : 0n;
+  const goalPercentage =
+    goalTarget > 0n ? Number((goalProgress * 100n) / goalTarget) : 0;
   const childActivities =
     family && child
-      ? family.activities.filter(
+      ? activities.filter(
           (activity) =>
             activity.type !== "PRINCIPAL_CONTRIBUTED" &&
             isChildActivity(activity, family, child.id),
@@ -69,143 +82,194 @@ export function KidHomeScreen() {
   return (
     <div className="wallet-screen kid-dashboard">
       <header className="kid-dashboard-header">
-        <HomeIllustration
-          className="kid-illustration"
-          name="girl"
-          alt={childName}
-          size={58}
-        />
+        <KidIllustration name="kid" alt="" size={58} />
         <div>
-          <h1>Hi {childName}!</h1>
-          <p>What will you achieve today?</p>
+          <h1>{child ? `Hi, ${childName}! 👋` : "Hi! 👋"}</h1>
+          <p>Let&apos;s keep growing!</p>
         </div>
-        <StarValue>{availableStars(child).toString()}</StarValue>
+        <div className="kid-header-actions">
+          {child && (
+            <span
+              className="kid-header-star-count"
+              role="img"
+              aria-label={`${stars} available Stars`}
+            >
+              <strong>{stars.toString()}</strong>
+              <Star size={15} fill="currentColor" aria-hidden="true" />
+            </span>
+          )}
+        </div>
       </header>
 
-      {activeGoal ? (
-        <button
-          className="kid-hero-card"
-          type="button"
-          onClick={() => {
-            if (child && kidGoalState(activeGoal, child)?.tab === "ongoing")
-              setContributionGoalId(activeGoal.id);
-            else router.push(kidGoalsHref({ goalId: activeGoal.id }));
-          }}
+      <section id="goal" className="kid-anchor-section">
+        <SectionTitle
+          action={
+            child && (activeGoal || pendingGoals.length > 0) ? (
+              <button
+                className="goal-add-link"
+                type="button"
+                aria-label="Request a new goal"
+                aria-haspopup="dialog"
+                onClick={() => setAddGoalOpen(true)}
+              >
+                <Plus size={18} aria-hidden="true" />
+              </button>
+            ) : undefined
+          }
         >
-          <div>
-            <span>Your next dream</span>
-            <h2>{activeGoal.title}</h2>
-            <p>
-              {allocated.toString()} of {activeGoal.starCost} Stars saved
-            </p>
-            <div
-              className="kid-goal-progress"
-              aria-label={`${progress}% complete`}
-            >
-              <span style={{ width: `${Math.min(progress, 100)}%` }} />
+          My goal
+        </SectionTitle>
+        {goalRequestsLoading ? (
+          <ActionStatus
+            state="working"
+            message="Checking your goal requests…"
+          />
+        ) : goalRequestsError ? (
+          <ActionStatus
+            state="error"
+            message="Couldn’t load your goal requests. Please try again."
+            onRefresh={() => void refresh(["goals"])}
+            refreshing={goalRequestsLoading}
+            refreshLabel="Refresh goal requests"
+          />
+        ) : null}
+        {activeGoal ? (
+          <button
+            className="kid-goal-card"
+            type="button"
+            onClick={() => {
+              if (child && kidGoalState(activeGoal, child)?.tab === "ongoing")
+                setContributionGoalId(activeGoal.id);
+              else router.push(kidGoalsHref({ goalId: activeGoal.id }));
+            }}
+          >
+            <KidIllustration
+              name={goalIllustration(activeGoal.title, activeGoal.icon)}
+              alt=""
+              size={82}
+            />
+            <div className="kid-goal-copy">
+              <strong>{activeGoal.title}</strong>
+              <span>
+                {goalProgress.toString()} / {goalTarget.toString()}{" "}
+                <Star size={14} fill="currentColor" aria-hidden="true" />
+              </span>
+              <div className="kid-goal-progress" aria-hidden="true">
+                <span style={{ width: `${goalPercentage}%` }} />
+              </div>
+              <small>
+                {goalTarget > goalProgress
+                  ? `${goalTarget - goalProgress} Stars to go`
+                  : "Ready to claim!"}
+              </small>
             </div>
-          </div>
-          <KidIllustration name="bicycle_sparkle" alt="A dream" size={116} />
-        </button>
-      ) : (
-        !pendingGoalRequests.length && (
-          <KidAddGoalCard onOpen={() => setAddGoalOpen(true)} />
-        )
-      )}
-      {goalRequestsLoading ? (
-        <ActionStatus state="working" message="Checking goal requests…" />
-      ) : goalRequestsError ? (
-        <ActionStatus
-          state="error"
-          message="Couldn’t load your goal requests. Please try again."
-          onRefresh={() => void refresh(["goals"])}
-          refreshing={goalRequestsLoading}
-          refreshLabel="Refresh goal requests"
-        />
-      ) : null}
-      {pendingGoalRequests.map((request) => (
-        <button
-          className="goal-request-summary"
-          type="button"
-          key={request.id}
-          onClick={() => setRequestId(request.id)}
-        >
-          <KidIllustration
-            name={goalIconAsset(request.icon)}
-            alt=""
-            size={56}
-          />
-          <span>
-            <strong>{request.title}</strong>
-            <small>Waiting for parent</small>
-          </span>
-          <ChevronRight size={18} aria-hidden="true" />
-        </button>
-      ))}
-      {activeGoal && !pendingGoalRequests.length && (
-        <KidAddGoalCard onOpen={() => setAddGoalOpen(true)} />
-      )}
-
-      <SectionTitle
-        action={
-          <Link href={kidGoalsHref()}>
-            See journey <ChevronRight size={15} />
-          </Link>
-        }
-      >
-        My progress
-      </SectionTitle>
-
-      {recentActivities.length ? (
-        <section className="dashboard-activity-list">
-          {recentActivities.map((row) => (
-            <article key={row.id}>
-              <KidIllustration name={row.kidIllustration} alt="" size={42} />
-              <span>{row.title}</span>
-              <strong>
-                {row.amount ?? ""} {row.currency ?? ""}
-              </strong>
-            </article>
+            <ChevronRight size={17} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+        ) : null}
+        {pendingGoals.map((request) => (
+          <button
+            className="goal-request-summary"
+            type="button"
+            key={request.id}
+            onClick={() => setRequestId(request.id)}
+          >
+            <KidIllustration
+              name={goalIconAsset(request.icon)}
+              alt=""
+              size={64}
+            />
+            <span>
+              <strong>{request.title}</strong>
+              <small>Waiting for Parent</small>
+            </span>
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
+        ))}
+        {!activeGoal &&
+          !pendingGoals.length &&
+          latestGoalRequest &&
+          (latestGoalRequest.status === "REJECTED" ||
+            latestGoalRequest.status === "CANCELLED") && (
+            <button
+              className="goal-request-summary"
+              type="button"
+              onClick={() => setRequestId(latestGoalRequest.id)}
+            >
+              <KidIllustration
+                name={goalIconAsset(latestGoalRequest.icon)}
+                alt=""
+                size={56}
+              />
+              <span>
+                <strong>{latestGoalRequest.title}</strong>
+                <small>
+                  {latestGoalRequest.status === "REJECTED"
+                    ? "Your parent declined this goal"
+                    : "Request cancelled"}
+                </small>
+              </span>
+              <ChevronRight size={18} aria-hidden="true" />
+            </button>
+          )}
+        {!activeGoal &&
+          !pendingGoals.length &&
+          !goalRequestsLoading &&
+          !goalRequestsError &&
+          (child ? (
+            <KidAddGoalCard onOpen={() => setAddGoalOpen(true)} />
+          ) : (
+            <SectionEmptyState />
           ))}
-        </section>
-      ) : (
-        <SectionEmptyState />
-      )}
+      </section>
 
-      <button
-        className="kid-activity-link"
-        type="button"
-        onClick={() => setActivityOpen(true)}
-      >
-        See all activity <ChevronRight size={15} />
-      </button>
+      <section id="quest" className="kid-anchor-section">
+        <SectionTitle>My Stars</SectionTitle>
+        {child ? (
+          <Link className="kid-quest-card" href="/wallet/kid/add-stars">
+            <KidIllustration name="jar_of_stars" alt="" size={70} />
+            <span>
+              <strong>{stars.toString()} Stars available</strong>
+              <small>Ask your parent to add Stars</small>
+            </span>
+            <ChevronRight size={17} strokeWidth={2.2} aria-hidden="true" />
+          </Link>
+        ) : (
+          <SectionEmptyState />
+        )}
+      </section>
 
-      <div className="kid-quick-actions">
-        <Link href="/wallet/kid/add-stars">
-          <HomeIllustration
-            name="jar_of_stars"
-            alt=""
-            size={48}
-            collection="kid"
-          />
-          <strong>Request Stars</strong>
-        </Link>
-        <Link href={kidGoalsHref()}>
-          <HomeIllustration
-            name="star_sparkle"
-            alt=""
-            size={48}
-            collection="kid"
-          />
-          <strong>My dreams</strong>
-        </Link>
-        <Link href="/wallet/kid/profile">
-          <span className="kid-add-icon">
-            <Plus size={22} />
-          </span>
-          <strong>My profile</strong>
-        </Link>
-      </div>
+      <section id="activity" className="kid-anchor-section">
+        <SectionTitle
+          action={
+            <button
+              className="section-see-all"
+              type="button"
+              onClick={() => setActivityOpen(true)}
+            >
+              See all <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          }
+        >
+          Recent activity
+        </SectionTitle>
+        {recentActivities.length ? (
+          recentActivities.map((row) => (
+            <div className="activity-row kid-activity-row" key={row.id}>
+              <KidIllustration name={row.kidIllustration} alt="" size={48} />
+              <span>
+                <strong>{row.title}</strong>
+                <small>{row.detail}</small>
+              </span>
+              {row.amount && row.currency === "STAR" && (
+                <StarValue compact>{row.amount}</StarValue>
+              )}
+            </div>
+          ))
+        ) : (
+          <SectionEmptyState />
+        )}
+      </section>
+
       {activityOpen && (
         <KidActivitySheet onClose={() => setActivityOpen(false)} />
       )}

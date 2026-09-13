@@ -10,6 +10,9 @@ import "@/components/onboarding/styles/shared.css";
 import "@/components/onboarding/styles/welcome.css";
 import "@/components/onboarding/styles/wallet.css";
 import "@/components/onboarding/styles/family.css";
+import "@/components/onboarding/styles/child.css";
+import "@/components/onboarding/styles/confirm.css";
+import "@/components/onboarding/styles/complete.css";
 import "@/components/home/home.css";
 import "./globals.css";
 
