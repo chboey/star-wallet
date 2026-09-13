@@ -1,9 +1,18 @@
+"use client";
+
 import Link from "next/link";
 import { ArrowLeftRight, ListChecks, Target } from "lucide-react";
 import { KidIllustration, KidScreenHeader } from "../kid-ui";
 import { HomeIllustration } from "../home-ui";
+import { useStarData } from "../star-data-provider";
 
 export function KidProfileScreen() {
+  const { child, childName } = useStarData();
+  const activeGoals =
+    child?.goals?.filter((goal) => goal.status === "ACTIVE") ?? [];
+  const completedGoals =
+    child?.goals?.filter((goal) => goal.status === "COMPLETED") ?? [];
+
   return (
     <div className="wallet-screen kid-profile-screen">
       <KidScreenHeader
@@ -20,24 +29,24 @@ export function KidProfileScreen() {
           <HomeIllustration
             className="kid-illustration"
             name="girl_star"
-            alt="Jane"
+            alt={childName}
             size={126}
           />
         </div>
-        <h1>Jane</h1>
-        <span>jane.tan.starwallet.eth</span>
+        <h1>{childName}</h1>
+        <span>{child?.ensName ?? "Child profile"}</span>
       </section>
 
       <section className="kid-profile-stats">
         <div>
           <Target size={20} />
-          <small>Dreams</small>
-          <strong>2</strong>
+          <small>Active dreams</small>
+          <strong>{activeGoals.length}</strong>
         </div>
         <div>
           <ListChecks size={20} />
-          <small>Quests done</small>
-          <strong>8</strong>
+          <small>Dreams completed</small>
+          <strong>{completedGoals.length}</strong>
         </div>
       </section>
 
@@ -46,11 +55,22 @@ export function KidProfileScreen() {
           <h2>My rewards</h2>
           <p>Things I&apos;m working toward</p>
         </header>
-        <div>
-          <KidIllustration name="bicycle" alt="Bicycle" size={92} />
-          <KidIllustration name="paint" alt="Art set" size={82} />
-          <KidIllustration name="books" alt="Books" size={78} />
-        </div>
+        {activeGoals.length ? (
+          <div>
+            {activeGoals.slice(0, 3).map((goal) => (
+              <KidIllustration
+                name="star_sparkle"
+                alt={goal.title}
+                size={82}
+                key={goal.id}
+              />
+            ))}
+          </div>
+        ) : (
+          <div>
+            <KidIllustration name="star_sparkle" alt="A Star" size={82} />
+          </div>
+        )}
       </section>
     </div>
   );

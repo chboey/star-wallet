@@ -3,30 +3,18 @@
 import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { displayEnsName } from "@/lib/star-format";
 import {
   type ActiveProfile,
   readActiveProfile,
   saveActiveProfile,
 } from "../active-profile";
-import { HomeIllustration } from "../home-ui";
-
-const profiles = [
-  {
-    id: "parent" as const,
-    name: "Tan Family",
-    image: "dad",
-    destination: "/wallet",
-  },
-  {
-    id: "child" as const,
-    name: "Jane",
-    image: "girl",
-    destination: "/wallet/kid",
-  },
-];
+import { HomeIllustration, SectionEmptyState } from "../home-ui";
+import { useStarData } from "../star-data-provider";
 
 export function ProfileSwitcherScreen() {
   const router = useRouter();
+  const { family, familyName, child, selectChild } = useStarData();
   const [activeProfile, setActiveProfile] = useState<ActiveProfile>("parent");
   const [profileLoaded, setProfileLoaded] = useState(false);
 
@@ -38,10 +26,17 @@ export function ProfileSwitcherScreen() {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  const selectProfile = (profile: (typeof profiles)[number]) => {
-    saveActiveProfile(profile.id);
-    setActiveProfile(profile.id);
-    router.replace(profile.destination);
+  const switchToParent = () => {
+    saveActiveProfile("parent");
+    setActiveProfile("parent");
+    router.replace("/wallet");
+  };
+
+  const switchToChild = (wallet: string) => {
+    selectChild(wallet);
+    saveActiveProfile("child");
+    setActiveProfile("child");
+    router.replace("/wallet/kid");
   };
 
   return (
@@ -66,27 +61,46 @@ export function ProfileSwitcherScreen() {
       </header>
 
       <div className="profile-switcher-list" aria-label="Family profiles">
-        {profiles.map((profile) => {
-          const selected = activeProfile === profile.id;
-          return (
+        {family ? (
+          <>
             <button
-              className={`profile-switcher-profile ${selected ? "is-active" : ""}`}
+              className={`profile-switcher-profile ${activeProfile === "parent" ? "is-active" : ""}`}
               type="button"
-              aria-pressed={selected}
-              aria-label={`Switch to ${profile.name}'s ${profile.id} profile`}
+              aria-pressed={activeProfile === "parent"}
+              aria-label={`Switch to ${familyName}'s parent profile`}
               disabled={!profileLoaded}
-              onClick={() => selectProfile(profile)}
-              key={profile.id}
+              onClick={switchToParent}
             >
-              <span
-                className={`profile-switcher-avatar profile-switcher-avatar-${profile.id}`}
-              >
-                <HomeIllustration name={profile.image} alt="" size={118} />
+              <span className="profile-switcher-avatar profile-switcher-avatar-parent">
+                <HomeIllustration name="dad" alt="" size={118} />
               </span>
-              <strong>{profile.name}</strong>
+              <strong>{familyName}</strong>
             </button>
-          );
-        })}
+            {family.children.map((familyChild) => {
+              const name = displayEnsName(familyChild.ensName, "Child");
+              const selected =
+                activeProfile === "child" && child?.id === familyChild.id;
+              return (
+                <button
+                  className={`profile-switcher-profile ${selected ? "is-active" : ""}`}
+                  type="button"
+                  aria-pressed={selected}
+                  aria-label={`Switch to ${name}'s child profile`}
+                  disabled={!profileLoaded}
+                  onClick={() => switchToChild(familyChild.wallet)}
+                  key={familyChild.id}
+                >
+                  <span className="profile-switcher-avatar profile-switcher-avatar-child">
+                    <HomeIllustration name="girl" alt="" size={118} />
+                  </span>
+                  <strong>{name}</strong>
+                </button>
+              );
+            })}
+          </>
+        ) : (
+          <SectionEmptyState className="is-tall" />
+        )}
       </div>
     </div>
   );

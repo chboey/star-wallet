@@ -2,8 +2,12 @@
 
 import { Cloud, House, UserRound, UsersRound } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { type ReactNode, useEffect } from "react";
+import { clearWalletSelection } from "@/lib/wallet-context";
+import { readActiveProfile, saveActiveProfile } from "./active-profile";
+import { StarDataBoundary, useStarData } from "./star-data-provider";
+import { WalletRefreshStatus } from "./home-ui";
 
 const parentNavigation = [
   { href: "/wallet", label: "Home", icon: House },
@@ -18,18 +22,39 @@ const kidNavigation = [
 ] as const;
 
 export function HomeAppShell({ children }: { children: ReactNode }) {
+  const { loading, error, needsOnboarding, family, refreshRequested } =
+    useStarData();
   const pathname = usePathname();
+  const router = useRouter();
   const profilesOpen = pathname === "/wallet/profiles";
   const kidMode = pathname.startsWith("/wallet/kid");
   const navigation = kidMode ? kidNavigation : parentNavigation;
+
+  useEffect(() => {
+    if (loading || error) return;
+    if (needsOnboarding) {
+      clearWalletSelection();
+      router.replace("/onboarding");
+      return;
+    }
+    if (!family || profilesOpen) return;
+    if (kidMode) {
+      saveActiveProfile("child");
+      return;
+    }
+    if (readActiveProfile() === "child") router.replace("/wallet/kid");
+  }, [loading, error, needsOnboarding, family, profilesOpen, kidMode, router]);
 
   return (
     <main className="wallet-app-page">
       <section
         className={`wallet-app-frame ${profilesOpen ? "profile-switcher-active" : ""}`}
       >
-        <div className="wallet-app-scroll">{children}</div>
-        {!profilesOpen && (
+        <div className="wallet-app-scroll">
+          <StarDataBoundary>{children}</StarDataBoundary>
+        </div>
+        <WalletRefreshStatus requested={!loading && refreshRequested} />
+        {!profilesOpen && !loading && !needsOnboarding && family && (
           <nav
             className={`wallet-bottom-nav ${kidMode ? "kid-bottom-nav" : ""}`}
             aria-label="Star Wallet navigation"

@@ -1,13 +1,16 @@
-import { Check, Target } from "lucide-react";
-import { KidIllustration, KidScreenHeader } from "../kid-ui";
-import { StarValue } from "../home-ui";
+"use client";
 
-const dreams = [
-  { title: "New bicycle", progress: "12 / 20", image: "bicycle" },
-  { title: "Art set", progress: "4 / 15", image: "paint" },
-] as const;
+import { Check, Target } from "lucide-react";
+import { goalIllustration } from "@/lib/star-format";
+import { KidIllustration, KidScreenHeader } from "../kid-ui";
+import { SectionEmptyState, StarValue } from "../home-ui";
+import { useStarData } from "../star-data-provider";
 
 export function KidJourneyScreen() {
+  const { child } = useStarData();
+  const goals = child?.goals ?? [];
+  const completed = goals.filter((goal) => goal.status === "COMPLETED");
+
   return (
     <div className="wallet-screen kid-journey-screen">
       <KidScreenHeader title="My journey" />
@@ -25,36 +28,42 @@ export function KidJourneyScreen() {
           Dreams
         </button>
         <button type="button" role="tab" aria-selected={false}>
-          Quests
+          Completed
         </button>
       </div>
 
-      <section className="journey-card-list">
-        {dreams.map((dream) => (
-          <article key={dream.title}>
-            <KidIllustration name={dream.image} alt="" size={64} />
-            <div>
-              <strong>{dream.title}</strong>
-              <span>{dream.progress} Stars</span>
-            </div>
-            <Target size={19} />
-          </article>
-        ))}
-        <article>
-          <KidIllustration name="purple_tick" alt="" size={64} />
-          <div>
-            <strong>Finished a book</strong>
-            <span>Quest completed</span>
-          </div>
-          <span className="journey-complete">
-            <Check size={18} />
-          </span>
-        </article>
-      </section>
+      {goals.length ? (
+        <section className="journey-card-list">
+          {goals.map((goal) => (
+            <article key={goal.id}>
+              <KidIllustration
+                name={goalIllustration(goal.title, goal.icon)}
+                alt=""
+                size={64}
+              />
+              <div>
+                <strong>{goal.title}</strong>
+                <span>
+                  {goal.allocatedStars ?? "0"} / {goal.starCost} Stars
+                </span>
+              </div>
+              {goal.status === "COMPLETED" ? (
+                <span className="journey-complete">
+                  <Check size={18} />
+                </span>
+              ) : (
+                <Target size={19} />
+              )}
+            </article>
+          ))}
+        </section>
+      ) : (
+        <SectionEmptyState className="is-tall" />
+      )}
 
       <div className="journey-total">
-        <span>Total Stars earned</span>
-        <StarValue>46</StarValue>
+        <span>Dreams completed</span>
+        <StarValue>{completed.length}</StarValue>
       </div>
     </div>
   );

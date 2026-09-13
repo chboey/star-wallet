@@ -1,36 +1,60 @@
+"use client";
+
 import { ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
-import { HomeIllustration, SectionTitle, StarValue } from "../home-ui";
+import { availableStars } from "@/lib/star-format";
+import {
+  HomeIllustration,
+  SectionEmptyState,
+  SectionTitle,
+  StarValue,
+} from "../home-ui";
 import { KidIllustration } from "../kid-ui";
+import { useStarData } from "../star-data-provider";
 
 export function KidHomeScreen() {
+  const { child, childName } = useStarData();
+  const goal = child?.goals?.find((item) => item.status === "ACTIVE");
+  const allocated = BigInt(goal?.allocatedStars ?? 0);
+  const cost = BigInt(goal?.starCost ?? 0);
+  const progress = cost ? Number((allocated * 100n) / cost) : 0;
+
   return (
     <div className="wallet-screen kid-dashboard">
       <header className="kid-dashboard-header">
         <HomeIllustration
           className="kid-illustration"
           name="girl"
-          alt="Jane"
+          alt={childName}
           size={58}
         />
         <div>
-          <h1>Hi Jane!</h1>
+          <h1>Hi {childName}!</h1>
           <p>What will you achieve today?</p>
         </div>
-        <StarValue>30</StarValue>
+        <StarValue>{availableStars(child).toString()}</StarValue>
       </header>
 
-      <section className="kid-hero-card">
-        <div>
-          <span>Your next dream</span>
-          <h2>New bicycle</h2>
-          <p>12 of 20 Stars saved</p>
-          <div className="kid-goal-progress" aria-label="60% complete">
-            <span />
+      {goal ? (
+        <section className="kid-hero-card">
+          <div>
+            <span>Your next dream</span>
+            <h2>{goal.title}</h2>
+            <p>
+              {allocated.toString()} of {goal.starCost} Stars saved
+            </p>
+            <div
+              className="kid-goal-progress"
+              aria-label={`${progress}% complete`}
+            >
+              <span style={{ width: `${Math.min(progress, 100)}%` }} />
+            </div>
           </div>
-        </div>
-        <KidIllustration name="bicycle_sparkle" alt="A bicycle" size={116} />
-      </section>
+          <KidIllustration name="bicycle_sparkle" alt="A dream" size={116} />
+        </section>
+      ) : (
+        <SectionEmptyState className="is-tall" />
+      )}
 
       <SectionTitle
         action={
@@ -39,19 +63,9 @@ export function KidHomeScreen() {
           </Link>
         }
       >
-        Today&apos;s quest
+        My progress
       </SectionTitle>
 
-      <article className="kid-quest-card">
-        <KidIllustration name="kid_reading_book" alt="Reading" size={76} />
-        <div>
-          <strong>Read for 20 minutes</strong>
-          <span>Complete this to earn</span>
-        </div>
-        <StarValue compact>5</StarValue>
-      </article>
-
-      <SectionTitle>Quick actions</SectionTitle>
       <div className="kid-quick-actions">
         <Link href="/wallet/kid/journey">
           <HomeIllustration

@@ -1,14 +1,20 @@
+"use client";
+
 import { ChevronRight, ListChecks } from "lucide-react";
 import Link from "next/link";
-import { HomeIllustration, SectionTitle, StarValue } from "../home-ui";
-
-const activity = [
-  { label: "Stars for finishing homework", value: "+5", image: "book" },
-  { label: "Saved toward a new bicycle", value: "+3", image: "bicycle" },
-  { label: "Weekly allowance added", value: "$10", image: "wallet" },
-] as const;
+import { availableStars, displayEnsName, formatUsd18 } from "@/lib/star-format";
+import {
+  HomeIllustration,
+  SectionEmptyState,
+  SectionTitle,
+  StarValue,
+} from "../home-ui";
+import { useStarData } from "../star-data-provider";
 
 export function HomeDashboard() {
+  const { family, familyName, portfolio } = useStarData();
+  const recent = family?.activities.slice(0, 3) ?? [];
+
   return (
     <div className="wallet-screen home-dashboard">
       <header className="dashboard-header">
@@ -23,14 +29,16 @@ export function HomeDashboard() {
               size={32}
             />
           </p>
-          <h1>Tan Family</h1>
+          <h1>{familyName}</h1>
         </div>
       </header>
 
       <section className="dashboard-balance-card">
         <div>
           <span>Family savings</span>
-          <strong>$1,590.68</strong>
+          <strong>
+            {formatUsd18(portfolio?.currentPortfolioValue.amount)}
+          </strong>
           <small>USDC and WETH</small>
         </div>
         <HomeIllustration
@@ -51,41 +59,53 @@ export function HomeDashboard() {
         Family
       </SectionTitle>
 
-      <section className="dashboard-child-card">
-        <HomeIllustration name="girl" alt="Jane" size={68} />
-        <div>
-          <strong>Jane</strong>
-          <span>Saving for a bicycle</span>
-        </div>
-        <StarValue>30</StarValue>
+      <section className="dashboard-children-list">
+        {(family?.children ?? []).map((child) => (
+          <article className="dashboard-child-card" key={child.id}>
+            <HomeIllustration name="girl" alt="" size={68} />
+            <div>
+              <strong>{displayEnsName(child.ensName, "Child")}</strong>
+              <span>{child.active ? "Active" : "Inactive"}</span>
+            </div>
+            <StarValue>{availableStars(child).toString()}</StarValue>
+          </article>
+        ))}
+        {!family?.children.length && <SectionEmptyState />}
       </section>
 
       <SectionTitle>Recent activity</SectionTitle>
-      <section className="dashboard-activity-list">
-        {activity.map((item) => (
-          <article key={item.label}>
-            <HomeIllustration
-              name={item.image}
-              alt=""
-              size={42}
-              collection={item.image === "book" ? "kid" : "home"}
-            />
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-          </article>
-        ))}
-      </section>
+      {recent.length ? (
+        <section className="dashboard-activity-list">
+          {recent.map((item) => (
+            <article key={item.id}>
+              <HomeIllustration name="star" alt="" size={42} />
+              <span>{activityLabel(item.type)}</span>
+              <strong>{item.amount ? `+${item.amount}` : "Updated"}</strong>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <SectionEmptyState />
+      )}
 
-      <Link className="dashboard-action-card" href="/wallet/kid">
+      <Link className="dashboard-action-card" href="/wallet/family">
         <span>
           <ListChecks size={20} />
         </span>
         <div>
-          <strong>Open Jane&apos;s dashboard</strong>
-          <small>See goals, quests and rewards</small>
+          <strong>Open family overview</strong>
+          <small>See balances, savings and children</small>
         </div>
         <ChevronRight size={18} />
       </Link>
     </div>
   );
+}
+
+function activityLabel(type: string) {
+  return type
+    .toLowerCase()
+    .split("_")
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
 }
