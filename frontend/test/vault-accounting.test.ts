@@ -7,11 +7,12 @@ const source = (path: string) =>
 
 test("vault details read live family accounting and label indexed withdrawal totals", () => {
   const details = source("components/home/onchain-details-sheet.tsx");
-  assert.match(details, /functionName: "getFamilyAccount"/);
-  assert.match(details, /live\?\.availableUsdc/);
-  assert.match(details, /live\?\.availableWeth/);
-  assert.match(details, /live\?\.totalPrincipalContributed/);
-  assert.match(details, /live\?\.totalPrincipalWithdrawn/);
+  const position = source("lib/aqua-position.ts");
+  assert.match(position, /functionName: "getFamilyAccount"/);
+  assert.match(details, /live\.data\?\.availableUsdc/);
+  assert.match(details, /live\.data\?\.availableWeth/);
+  assert.match(details, /live\.data\?\.totalPrincipalContributed/);
+  assert.match(details, /live\.data\?\.totalPrincipalWithdrawn/);
   assert.match(details, /savings\?\.totalUsdcWithdrawn/);
   assert.match(details, /savings\?\.totalWethWithdrawn/);
   assert.match(details, /Ethereum Sepolia \(testnet\)/);

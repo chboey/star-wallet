@@ -9,6 +9,7 @@ import {
 } from "viem";
 import { sepolia } from "viem/chains";
 import type { IntentEnvelope } from "./star-api.types";
+import { aquaPositionKey } from "./aqua-position";
 import { refreshAfterWalletAction } from "./wallet-refresh";
 
 /** Refresh the live vault balance and family reads when dismissing a confirmed deposit. */
@@ -17,8 +18,13 @@ export async function refreshWethFundingReads(
   familyId: string,
   vault: Address,
 ) {
-  void vault;
-  await refreshAfterWalletAction(client, "fundWeth", { familyId }, true);
+  await Promise.all([
+    client.invalidateQueries(
+      { queryKey: aquaPositionKey(vault), exact: true },
+      { cancelRefetch: true, throwOnError: true },
+    ),
+    refreshAfterWalletAction(client, "fundWeth", { familyId }, true),
+  ]);
 }
 
 /** Reject excess precision rather than rounding the amount the parent entered. */

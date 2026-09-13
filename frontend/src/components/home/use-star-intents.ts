@@ -25,6 +25,12 @@ import {
 } from "@/lib/star-api";
 import { sendChildIntent } from "@/lib/child-account";
 import {
+  aquaPositionKey,
+  readAquaPosition,
+  validatePositionAmounts,
+  validateShipSavingsIntents,
+} from "@/lib/aqua-position";
+import {
   contributionAmount,
   contributionLimit,
   goalContributionConfirmationsKey,
@@ -108,6 +114,26 @@ export function useStarIntents() {
       if (signerRole !== "CHILD" && chainId !== sepolia.id)
         await switchChainAsync({ chainId: sepolia.id });
 
+      if (action === "shipSavings") {
+        if (
+          signerRole !== "PARENT" ||
+          !family?.active ||
+          !family.vault ||
+          !("usdcAmountUnits" in body) ||
+          body.familyId !== family.id
+        )
+          throw new Error(
+            "Select an active family vault before creating a position.",
+          );
+        const state = await readAquaPosition(publicClient, family.vault.id);
+        queryClient.setQueryData(aquaPositionKey(family.vault.id), state);
+        validatePositionAmounts(
+          state,
+          BigInt(body.usdcAmountUnits),
+          BigInt(body.wethAmountUnits),
+        );
+      }
+
       if (action === "addStarsToGoal") {
         if (
           signerRole !== "CHILD" ||
@@ -142,6 +168,25 @@ export function useStarIntents() {
       }
 
       const envelope = await starApi.intent(action, body);
+      if (
+        action === "shipSavings" &&
+        family?.vault &&
+        "usdcAmountUnits" in body
+      ) {
+        const strategy = validateShipSavingsIntents(envelope, {
+          vault: family.vault.id,
+          usdc: BigInt(body.usdcAmountUnits),
+          weth: BigInt(body.wethAmountUnits),
+        });
+        const parameters = await publicClient.readContract({
+          address: family.vault.id,
+          abi: familyVaultAbi,
+          functionName: "inspectSavingsStrategy",
+          args: [strategy],
+        });
+        if (parameters.feeBps !== ("feeBps" in body ? (body.feeBps ?? 30) : 30))
+          throw new Error("The Aqua trading fee does not match your review.");
+      }
       if (
         action === "addStarsToGoal" &&
         child &&
@@ -291,6 +336,12 @@ export function useStarIntents() {
         state: "indexing",
         message: "Transaction confirmed! Updating your wallet…",
       });
+      if (action === "shipSavings" && family?.vault) {
+        await queryClient.invalidateQueries({
+          queryKey: aquaPositionKey(family.vault.id),
+          exact: true,
+        });
+      }
       if (action === "addStarsToGoal" && child && "goalId" in body) {
         await queryClient.invalidateQueries({
           queryKey: goalContributionKey(child.wallet, body.goalId),
