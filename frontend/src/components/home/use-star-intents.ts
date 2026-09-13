@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { childAccountAbi } from "@star/contracts/abi";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Hash } from "viem";
 import { sepolia } from "viem/chains";
@@ -28,6 +29,10 @@ import {
   validateGoalContributionIntent,
   type GoalContributionSnapshot,
 } from "@/lib/goal-contributions";
+import {
+  goalRequestActions,
+  validateGoalRequestIntents,
+} from "@/lib/goal-request-intents";
 import { waitForIndexedBlock } from "@/lib/indexed-transaction";
 import {
   appendTransactionHash,
@@ -140,6 +145,27 @@ export function useStarIntents() {
           goalId: body.goalId,
           amount: body.amount,
         });
+      if ((goalRequestActions as readonly string[]).includes(action)) {
+        const requestChild =
+          "childId" in body
+            ? family?.children.find((item) => item.id === body.childId)
+            : undefined;
+        if (!requestChild)
+          throw new Error("Select the child for this goal request.");
+        const goalsAddress = await publicClient.readContract({
+          address: requestChild.wallet,
+          abi: childAccountAbi,
+          functionName: "goals",
+        });
+        validateGoalRequestIntents(
+          action,
+          body,
+          envelope,
+          goalsAddress,
+          family!.children,
+          child,
+        );
+      }
       if (
         envelope.intents.some(
           (intent) =>

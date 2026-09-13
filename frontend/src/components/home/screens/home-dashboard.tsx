@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Hash } from "viem";
 import { availableStars, displayEnsName, formatUsd18 } from "@/lib/star-format";
+import { goalIconAsset } from "@/lib/goal-requests";
+import { ActionStatus } from "../action-status";
+import { GoalRequestSheet } from "../goal-request-sheet";
 import {
   HomeIllustration,
   SectionEmptyState,
@@ -29,10 +32,19 @@ export function HomeDashboard({
   initialRewardApprovalHashes?: readonly Hash[];
 } = {}) {
   const router = useRouter();
-  const { family, familyName, portfolio } = useStarData();
+  const {
+    family,
+    familyName,
+    portfolio,
+    goalRequests,
+    goalRequestsLoading,
+    goalRequestsError,
+    refresh,
+  } = useStarData();
   const [activityOpen, setActivityOpen] = useState(false);
   const [walletActivityOpen, setWalletActivityOpen] = useState(false);
   const [rewardOpen, setRewardOpen] = useState(false);
+  const [goalRequestId, setGoalRequestId] = useState<string | null>(null);
   const [rewardApprovalOpen, setRewardApprovalOpen] = useState(
     initialRewardApprovalHashes !== undefined,
   );
@@ -47,6 +59,9 @@ export function HomeDashboard({
       name: displayEnsName(child.ensName, "Child"),
     }));
   const activities = family?.activities ?? [];
+  const pendingGoalRequests = goalRequests.filter(
+    (request) => request.status === "PENDING",
+  );
   const recentActivities = family
     ? presentRecentActivities(activities, family)
     : [];
@@ -113,6 +128,43 @@ export function HomeDashboard({
         {!family?.children.length && <SectionEmptyState />}
       </section>
 
+      <SectionTitle>Goal requests</SectionTitle>
+      {pendingGoalRequests.map((request) => (
+        <button
+          className="goal-request-summary"
+          type="button"
+          key={request.id}
+          onClick={() => setGoalRequestId(request.id)}
+        >
+          <HomeIllustration
+            name={goalIconAsset(request.icon)}
+            collection="kid"
+            alt=""
+            size={56}
+          />
+          <span>
+            <strong>{request.title}</strong>
+            <small>
+              Requested by {displayEnsName(request.child.ensName, "Child")}
+            </small>
+          </span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+      ))}
+      {goalRequestsLoading ? (
+        <ActionStatus state="working" message="Checking goal requests…" />
+      ) : goalRequestsError ? (
+        <ActionStatus
+          state="error"
+          message="Couldn’t load goal requests. Please try again."
+          onRefresh={() => void refresh(["goals"])}
+          refreshing={goalRequestsLoading}
+          refreshLabel="Refresh goal requests"
+        />
+      ) : !pendingGoalRequests.length ? (
+        <SectionEmptyState />
+      ) : null}
+
       <SectionTitle
         action={
           <button type="button" onClick={() => setActivityOpen(true)}>
@@ -172,6 +224,12 @@ export function HomeDashboard({
         <ParentRewardStarsSheet
           childChoices={children}
           onClose={() => setRewardOpen(false)}
+        />
+      )}
+      {goalRequestId && (
+        <GoalRequestSheet
+          requestId={goalRequestId}
+          onClose={() => setGoalRequestId(null)}
         />
       )}
       {activityOpen && (

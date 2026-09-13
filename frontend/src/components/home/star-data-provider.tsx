@@ -29,6 +29,7 @@ import {
   goalContributionConfirmationsKey,
   type GoalContributionSnapshot,
 } from "@/lib/goal-contributions";
+import { withGoalMetadata, type GoalRequest } from "@/lib/goal-requests";
 import { displayEnsName } from "@/lib/star-format";
 import {
   matchesWalletReads,
@@ -57,6 +58,11 @@ type StarDataContextValue = {
   needsOnboarding: boolean;
   refreshRequested: boolean;
   error: Error | null;
+  goalRequests: GoalRequest[];
+  goalRequestsSupported: boolean | undefined;
+  goalRequestsAddress: `0x${string}` | null;
+  goalRequestsLoading: boolean;
+  goalRequestsError: Error | null;
   selectChild: (wallet: string) => void;
   refresh: (reads?: readonly WalletRead[]) => Promise<void>;
 };
@@ -123,6 +129,18 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
     enabled: false,
     queryFn: async () => [],
   });
+
+  const goalRequestsQuery = useQuery({
+    ...starReadOptions,
+    queryKey: ["star", "family", familyId, "goal-requests"],
+    queryFn: ({ signal }) => starApi.allGoalRequests(familyId!, { signal }),
+    enabled: familyId !== null,
+  });
+  useReadOnEntry(
+    ["star", "family", familyId, "goal-requests"],
+    familyId !== null,
+    familyId ?? "",
+  );
 
   const portfolioQuery = useQuery({
     ...starReadOptions,
@@ -200,8 +218,41 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
     () => ({
       hydrated: draft !== null,
       familyId,
-      family,
-      child,
+      family: family
+        ? {
+            ...family,
+            goals: family.goals.map((goal) =>
+              withGoalMetadata(goal, goalRequestsQuery.data?.requests ?? []),
+            ),
+            redemptions: family.redemptions.map((redemption) => ({
+              ...redemption,
+              goal: withGoalMetadata(
+                redemption.goal,
+                goalRequestsQuery.data?.requests ?? [],
+              ),
+            })),
+          }
+        : null,
+      child: child
+        ? {
+            ...child,
+            goals: child.goals?.map((goal) =>
+              withGoalMetadata(goal, goalRequestsQuery.data?.requests ?? []),
+            ),
+            redemptions: child.redemptions?.map((redemption) => ({
+              ...redemption,
+              goal: withGoalMetadata(
+                redemption.goal,
+                goalRequestsQuery.data?.requests ?? [],
+              ),
+            })),
+          }
+        : null,
+      goalRequests: goalRequestsQuery.data?.requests ?? [],
+      goalRequestsSupported: goalRequestsQuery.data?.supported,
+      goalRequestsAddress: goalRequestsQuery.data?.goalsAddress ?? null,
+      goalRequestsLoading: goalRequestsQuery.isPending,
+      goalRequestsError: goalRequestsQuery.error,
       portfolio: portfolioQuery.data ?? null,
       familyName: displayEnsName(family?.ensName, "Your family"),
       childName: displayEnsName(child?.ensName, "Child"),
@@ -223,6 +274,9 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
       familyId,
       family,
       child,
+      goalRequestsQuery.data,
+      goalRequestsQuery.isPending,
+      goalRequestsQuery.error,
       portfolioQuery.data,
       loading,
       error,

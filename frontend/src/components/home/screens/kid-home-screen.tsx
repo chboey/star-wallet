@@ -16,16 +16,31 @@ import {
   SectionTitle,
   StarValue,
 } from "../home-ui";
+import { ActionStatus } from "../action-status";
+import { GoalRequestSheet } from "../goal-request-sheet";
+import { goalIconAsset } from "@/lib/goal-requests";
 import { KidIllustration } from "../kid-ui";
+import { KidAddGoalCard } from "../kid-add-goal-card";
 import { useStarData } from "../star-data-provider";
 import { isChildActivity, presentRecentActivities } from "../star-activity";
 import { KidActivitySheet } from "../kid-activity-sheet";
 import { GoalContributionSheet } from "../goal-contribution-sheet";
+import { KidGoalRequestScreen } from "./kid-goal-request-screen";
 
 export function KidHomeScreen() {
   const router = useRouter();
-  const { child, childName, family } = useStarData();
+  const {
+    child,
+    childName,
+    family,
+    goalRequests,
+    goalRequestsLoading,
+    goalRequestsError,
+    refresh,
+  } = useStarData();
   const [activityOpen, setActivityOpen] = useState(false);
+  const [addGoalOpen, setAddGoalOpen] = useState(false);
+  const [requestId, setRequestId] = useState<string | null>(null);
   const [contributionGoalId, setContributionGoalId] = useState<string | null>(
     null,
   );
@@ -36,6 +51,9 @@ export function KidHomeScreen() {
   const allocated = activeGoal ? goalAllocatedStars(activeGoal) : 0n;
   const cost = BigInt(activeGoal?.starCost ?? 0);
   const progress = cost ? Number((allocated * 100n) / cost) : 0;
+  const pendingGoalRequests = goalRequests.filter(
+    (request) => request.child.id === child?.id && request.status === "PENDING",
+  );
   const childActivities =
     family && child
       ? family.activities.filter(
@@ -90,7 +108,42 @@ export function KidHomeScreen() {
           <KidIllustration name="bicycle_sparkle" alt="A dream" size={116} />
         </button>
       ) : (
-        <SectionEmptyState className="is-tall" />
+        !pendingGoalRequests.length && (
+          <KidAddGoalCard onOpen={() => setAddGoalOpen(true)} />
+        )
+      )}
+      {goalRequestsLoading ? (
+        <ActionStatus state="working" message="Checking goal requests…" />
+      ) : goalRequestsError ? (
+        <ActionStatus
+          state="error"
+          message="Couldn’t load your goal requests. Please try again."
+          onRefresh={() => void refresh(["goals"])}
+          refreshing={goalRequestsLoading}
+          refreshLabel="Refresh goal requests"
+        />
+      ) : null}
+      {pendingGoalRequests.map((request) => (
+        <button
+          className="goal-request-summary"
+          type="button"
+          key={request.id}
+          onClick={() => setRequestId(request.id)}
+        >
+          <KidIllustration
+            name={goalIconAsset(request.icon)}
+            alt=""
+            size={56}
+          />
+          <span>
+            <strong>{request.title}</strong>
+            <small>Waiting for parent</small>
+          </span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+      ))}
+      {activeGoal && !pendingGoalRequests.length && (
+        <KidAddGoalCard onOpen={() => setAddGoalOpen(true)} />
       )}
 
       <SectionTitle
@@ -152,6 +205,16 @@ export function KidHomeScreen() {
           key={contributionGoal.id}
           goal={contributionGoal}
           onClose={() => setContributionGoalId(null)}
+        />
+      )}
+      {addGoalOpen && (
+        <KidGoalRequestScreen onClose={() => setAddGoalOpen(false)} />
+      )}
+      {requestId && (
+        <GoalRequestSheet
+          requestId={requestId}
+          childOnly
+          onClose={() => setRequestId(null)}
         />
       )}
     </div>
