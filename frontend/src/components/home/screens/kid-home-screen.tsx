@@ -2,9 +2,14 @@
 
 import { ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { availableStars } from "@/lib/star-format";
-import { kidGoalsHref } from "@/lib/kid-goals";
+import {
+  goalAllocatedStars,
+  kidGoalsHref,
+  kidGoalState,
+} from "@/lib/kid-goals";
 import {
   HomeIllustration,
   SectionEmptyState,
@@ -15,13 +20,21 @@ import { KidIllustration } from "../kid-ui";
 import { useStarData } from "../star-data-provider";
 import { isChildActivity, presentRecentActivities } from "../star-activity";
 import { KidActivitySheet } from "../kid-activity-sheet";
+import { GoalContributionSheet } from "../goal-contribution-sheet";
 
 export function KidHomeScreen() {
+  const router = useRouter();
   const { child, childName, family } = useStarData();
   const [activityOpen, setActivityOpen] = useState(false);
-  const goal = child?.goals?.find((item) => item.status === "ACTIVE");
-  const allocated = BigInt(goal?.allocatedStars ?? 0);
-  const cost = BigInt(goal?.starCost ?? 0);
+  const [contributionGoalId, setContributionGoalId] = useState<string | null>(
+    null,
+  );
+  const activeGoal = child?.goals?.find((item) => item.status === "ACTIVE");
+  const contributionGoal = child?.goals?.find(
+    (item) => item.id === contributionGoalId,
+  );
+  const allocated = activeGoal ? goalAllocatedStars(activeGoal) : 0n;
+  const cost = BigInt(activeGoal?.starCost ?? 0);
   const progress = cost ? Number((allocated * 100n) / cost) : 0;
   const childActivities =
     family && child
@@ -51,13 +64,21 @@ export function KidHomeScreen() {
         <StarValue>{availableStars(child).toString()}</StarValue>
       </header>
 
-      {goal ? (
-        <section className="kid-hero-card">
+      {activeGoal ? (
+        <button
+          className="kid-hero-card"
+          type="button"
+          onClick={() => {
+            if (child && kidGoalState(activeGoal, child)?.tab === "ongoing")
+              setContributionGoalId(activeGoal.id);
+            else router.push(kidGoalsHref({ goalId: activeGoal.id }));
+          }}
+        >
           <div>
             <span>Your next dream</span>
-            <h2>{goal.title}</h2>
+            <h2>{activeGoal.title}</h2>
             <p>
-              {allocated.toString()} of {goal.starCost} Stars saved
+              {allocated.toString()} of {activeGoal.starCost} Stars saved
             </p>
             <div
               className="kid-goal-progress"
@@ -67,7 +88,7 @@ export function KidHomeScreen() {
             </div>
           </div>
           <KidIllustration name="bicycle_sparkle" alt="A dream" size={116} />
-        </section>
+        </button>
       ) : (
         <SectionEmptyState className="is-tall" />
       )}
@@ -125,6 +146,13 @@ export function KidHomeScreen() {
       </div>
       {activityOpen && (
         <KidActivitySheet onClose={() => setActivityOpen(false)} />
+      )}
+      {contributionGoal && (
+        <GoalContributionSheet
+          key={contributionGoal.id}
+          goal={contributionGoal}
+          onClose={() => setContributionGoalId(null)}
+        />
       )}
     </div>
   );

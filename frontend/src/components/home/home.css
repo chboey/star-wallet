@@ -331,6 +331,11 @@ button.dashboard-balance-card {
   cursor: pointer;
 }
 
+button.kid-hero-card {
+  cursor: pointer;
+  font: inherit;
+}
+
 .dashboard-balance-card > div,
 .kid-hero-card > div {
   position: relative;
@@ -1895,6 +1900,130 @@ button.dashboard-balance-card {
   background: var(--lavender);
   font-size: 12px;
   font-weight: 700;
+}
+
+.kid-primary-action {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.goal-contribution-content {
+  display: grid;
+  gap: 22px;
+}
+
+.goal-contribution-sheet {
+  padding-bottom: 12px;
+}
+
+.goal-contribution-content > .filled-action-button {
+  width: 100%;
+  min-height: 46px;
+}
+
+.goal-contribution-available {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.goal-contribution-available strong {
+  position: relative;
+  display: block;
+  color: var(--navy);
+  font-size: 27px;
+  line-height: 1;
+  text-align: center;
+}
+
+.goal-contribution-available strong > svg {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 6px);
+  color: #ffbf36;
+  transform: translateY(-50%);
+}
+
+.goal-contribution-stepper {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 16px;
+}
+
+.goal-contribution-stepper button {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--purple);
+  background: #f6f3ff;
+  cursor: pointer;
+}
+
+.goal-contribution-stepper button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.goal-contribution-stepper label {
+  min-width: 0;
+  height: 42px;
+  margin: 0;
+  display: grid;
+  place-items: center;
+}
+
+.goal-contribution-stepper input {
+  width: 100%;
+  max-width: 110px;
+  min-width: 0;
+  height: 42px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  color: var(--navy);
+  background: transparent;
+  font: inherit;
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 42px;
+  text-align: center;
+}
+
+.goal-contribution-stepper :focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 3px;
+}
+
+.goal-contribution-success {
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--navy);
+}
+
+.goal-contribution-success > span {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.goal-contribution-note {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 @media (max-width: 520px) {

@@ -24,6 +24,11 @@ import {
   type StarPortfolio,
 } from "@/lib/star-api";
 import { childFromFamily } from "@/lib/family-child";
+import {
+  applyGoalContributionSnapshots,
+  goalContributionConfirmationsKey,
+  type GoalContributionSnapshot,
+} from "@/lib/goal-contributions";
 import { displayEnsName } from "@/lib/star-format";
 import {
   matchesWalletReads,
@@ -112,6 +117,13 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
     familyId ?? "",
   );
 
+  const contributionConfirmations = useQuery<GoalContributionSnapshot[]>({
+    ...starReadOptions,
+    queryKey: goalContributionConfirmationsKey(familyId),
+    enabled: false,
+    queryFn: async () => [],
+  });
+
   const portfolioQuery = useQuery({
     ...starReadOptions,
     queryKey: ["star", "portfolio", familyId],
@@ -124,7 +136,14 @@ export function StarDataProvider({ children }: { children: ReactNode }) {
     familyId ?? "",
   );
 
-  const family = familyQuery.data ?? null;
+  const family = useMemo(
+    () =>
+      applyGoalContributionSnapshots(
+        familyQuery.data ?? null,
+        contributionConfirmations.data ?? [],
+      ),
+    [familyQuery.data, contributionConfirmations.data],
+  );
   const selectedChild = useMemo(() => {
     if (!family?.children.length) return null;
     const selected = selectedChildWallet.toLowerCase();

@@ -18,6 +18,16 @@ import {
   type SignerRole,
   type TransactionIntent,
 } from "@/lib/star-api";
+import { sendChildIntent } from "@/lib/child-account";
+import {
+  contributionAmount,
+  contributionLimit,
+  goalContributionConfirmationsKey,
+  goalContributionKey,
+  readGoalContribution,
+  validateGoalContributionIntent,
+  type GoalContributionSnapshot,
+} from "@/lib/goal-contributions";
 import { waitForIndexedBlock } from "@/lib/indexed-transaction";
 import {
   appendTransactionHash,
@@ -40,7 +50,7 @@ export function useStarIntents() {
   const { sendTransactionAsync } = useSendTransaction();
   const publicClient = usePublicClient({ chainId: sepolia.id });
   const queryClient = useQueryClient();
-  const { family } = useStarData();
+  const { family, child } = useStarData();
   const [operation, setOperation] = useState<IntentOperation>({
     state: "idle",
   });
@@ -67,26 +77,69 @@ export function useStarIntents() {
 
     setOperation({ state: "signing", message: "Preparing your request…" });
     try {
-      if (!address || !isConnected)
+      if (signerRole !== "CHILD" && (!address || !isConnected))
         throw new Error("Connect the signing wallet first.");
       if (!publicClient) throw new Error("The Sepolia client is unavailable.");
-      if (signerRole === "CHILD")
-        throw new Error("Use the child passkey flow for child actions.");
       const expectedAddress =
         signerRole === "PARENT"
           ? family?.parent
           : family?.vault?.emergencyAdmin;
       if (
+        signerRole !== "CHILD" &&
         expectedAddress &&
-        expectedAddress.toLowerCase() !== address.toLowerCase()
+        expectedAddress.toLowerCase() !== address?.toLowerCase()
       )
         throw new Error(
           `Connect the registered ${signerRole.toLowerCase()} wallet to continue.`,
         );
-      if (chainId !== sepolia.id)
+      if (signerRole !== "CHILD" && chainId !== sepolia.id)
         await switchChainAsync({ chainId: sepolia.id });
 
+      if (action === "addStarsToGoal") {
+        if (
+          signerRole !== "CHILD" ||
+          !child?.active ||
+          !family?.active ||
+          !("goalId" in body) ||
+          !("amount" in body) ||
+          !child.goals?.some((goal) => goal.id === body.goalId)
+        )
+          throw new Error("Select an active goal belonging to this child.");
+        const state = await readGoalContribution(
+          publicClient,
+          child.wallet,
+          child.id,
+          body.goalId,
+        );
+        queryClient.setQueryData(
+          goalContributionKey(child.wallet, body.goalId),
+          state,
+        );
+        const amount = contributionAmount(body.amount);
+        if (
+          state.status !== 0 ||
+          state.pendingId !== 0n ||
+          !amount ||
+          amount >
+            contributionLimit(state.available, state.target, state.allocated)
+        )
+          throw new Error(
+            "Check the Stars available and the amount this goal still needs.",
+          );
+      }
+
       const envelope = await starApi.intent(action, body);
+      if (
+        action === "addStarsToGoal" &&
+        child &&
+        "goalId" in body &&
+        "amount" in body
+      )
+        validateGoalContributionIntent(envelope, {
+          wallet: child.wallet,
+          goalId: body.goalId,
+          amount: body.amount,
+        });
       if (
         envelope.intents.some(
           (intent) =>
@@ -98,19 +151,44 @@ export function useStarIntents() {
       let receiptBlock = 0n;
       for (const intent of envelope.intents) {
         updateOperation({ state: "signing", message: intent.summary });
-        receiptBlock = await sendIntent(
-          intent,
-          address,
-          publicClient,
-          sendTransactionAsync,
-          onTransactionHash,
-        );
+        receiptBlock =
+          signerRole === "CHILD"
+            ? await sendChildIntent(intent)
+            : await sendIntent(
+                intent,
+                address!,
+                publicClient,
+                sendTransactionAsync,
+                onTransactionHash,
+              );
       }
 
       updateOperation({
         state: "indexing",
         message: "Transaction confirmed! Updating your wallet…",
       });
+      if (action === "addStarsToGoal" && child && "goalId" in body) {
+        await queryClient.invalidateQueries({
+          queryKey: goalContributionKey(child.wallet, body.goalId),
+          exact: true,
+        });
+        const snapshot = queryClient.getQueryData<GoalContributionSnapshot>(
+          goalContributionKey(child.wallet, body.goalId),
+        );
+        if (snapshot && snapshot.blockNumber >= receiptBlock && family) {
+          queryClient.setQueryData<GoalContributionSnapshot[]>(
+            goalContributionConfirmationsKey(family.id),
+            (current = []) => [
+              ...current.filter(
+                (item) =>
+                  item.goalId !== snapshot.goalId ||
+                  item.wallet !== snapshot.wallet,
+              ),
+              snapshot,
+            ],
+          );
+        }
+      }
       const indexed = await waitForIndexedBlock(receiptBlock);
       await refreshAfterWalletAction(
         queryClient,

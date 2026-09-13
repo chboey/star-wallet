@@ -7,6 +7,7 @@ import { kidGoalsHref, kidGoalState, type KidGoalTab } from "@/lib/kid-goals";
 import { KidGoalTabs } from "../kid-goal-feedback";
 import { KidGoalListCard } from "../kid-goal-list-card";
 import { KidIllustration, KidScreenHeader } from "../kid-ui";
+import { GoalContributionSheet } from "../goal-contribution-sheet";
 import { SectionEmptyState } from "../home-ui";
 import { useStarData } from "../star-data-provider";
 
@@ -20,12 +21,21 @@ export function KidGoalsScreen({
   initialGoalId?: string;
 }) {
   const { child } = useStarData();
+  const goals = child?.goals ?? [];
+  const initialGoal = goals.find((goal) => goal.id === initialGoalId);
+  const initialContribution = Boolean(
+    initialGoal && child && kidGoalState(initialGoal, child)?.tab === "ongoing",
+  );
   const [tab, setTab] = useState<KidGoalTab>(initialTab);
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(
-    initialGoalId ?? null,
+    initialContribution ? null : (initialGoalId ?? null),
   );
+  const [contributionGoalId, setContributionGoalId] = useState<string | null>(
+    initialContribution ? (initialGoal?.id ?? null) : null,
+  );
+  const contributionGoal = goals.find((goal) => goal.id === contributionGoalId);
   const entries = child
-    ? (child.goals ?? []).flatMap((goal) => {
+    ? goals.flatMap((goal) => {
         const state = kidGoalState(goal, child);
         return state ? [state] : [];
       })
@@ -103,7 +113,23 @@ export function KidGoalsScreen({
                     : `${selected.progress} Stars allocated`}
             </span>
           </div>
+          {selected.tab === "ongoing" && (
+            <button
+              className="filled-action-button kid-primary-action"
+              type="button"
+              onClick={() => setContributionGoalId(selected.goal.id)}
+            >
+              Add Stars
+            </button>
+          )}
         </div>
+        {contributionGoal && (
+          <GoalContributionSheet
+            key={contributionGoal.id}
+            goal={contributionGoal}
+            onClose={() => setContributionGoalId(null)}
+          />
+        )}
       </GoalShell>
     );
   }
@@ -128,7 +154,8 @@ export function KidGoalsScreen({
               pending={waiting}
               completed={completed}
               onOpen={() => {
-                setSelectedGoalId(goal.id);
+                if (tab === "ongoing") setContributionGoalId(goal.id);
+                else setSelectedGoalId(goal.id);
                 syncLocation(tab, goal.id);
               }}
             />
@@ -136,6 +163,20 @@ export function KidGoalsScreen({
         </div>
       ) : (
         <SectionEmptyState className="kid-goals-empty" />
+      )}
+      {contributionGoal && (
+        <GoalContributionSheet
+          key={contributionGoal.id}
+          goal={contributionGoal}
+          onClose={() => {
+            const nextTab = child
+              ? (kidGoalState(contributionGoal, child)?.tab ?? tab)
+              : tab;
+            setContributionGoalId(null);
+            setTab(nextTab);
+            syncLocation(nextTab);
+          }}
+        />
       )}
     </GoalShell>
   );
