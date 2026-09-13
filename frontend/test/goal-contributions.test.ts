@@ -348,7 +348,7 @@ test("child contributions validate the exact account call before passkey submiss
   const intents = source("components/home/use-star-intents.ts");
   assert.ok(
     intents.indexOf("validateGoalContributionIntent") <
-      intents.indexOf("await sendChildIntent(intent)"),
+      intents.indexOf("await sendChildIntent(intent, authorizeDevice)"),
   );
   const account = source("lib/child-account.ts");
   assert.match(account, /decodeChildCall\(intent\.data\)/);

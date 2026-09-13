@@ -40,6 +40,7 @@ import {
   waitForParentTransaction,
 } from "@/lib/parent-transactions";
 import { refreshAfterWalletAction } from "@/lib/wallet-refresh";
+import { useParentAuthorization } from "./parent-authorization-provider";
 import { useStarData } from "./star-data-provider";
 
 export type IntentOperation = { transactionHashes?: readonly Hash[] } & (
@@ -57,6 +58,7 @@ export function useStarIntents() {
   const publicClient = usePublicClient({ chainId: sepolia.id });
   const queryClient = useQueryClient();
   const { family, child } = useStarData();
+  const authorizeDevice = useParentAuthorization();
   const [operation, setOperation] = useState<IntentOperation>({
     state: "idle",
   });
@@ -215,7 +217,7 @@ export function useStarIntents() {
         updateOperation({ state: "signing", message: intent.summary });
         receiptBlock =
           signerRole === "CHILD"
-            ? await sendChildIntent(intent)
+            ? await sendChildIntent(intent, authorizeDevice)
             : await sendIntent(
                 intent,
                 address!,

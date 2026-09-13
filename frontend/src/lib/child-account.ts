@@ -1,6 +1,8 @@
 import {
+  createParentSessionGasStub,
   createPasskeyGasStub,
   decodeChildCall,
+  encodeParentSessionSignature,
   encodePasskeySignature,
   maxPasskeyAuthenticatorDataBytes,
   maxPasskeyClientDataBytes,
@@ -17,6 +19,8 @@ import {
   toWebAuthnAccount,
 } from "viem/account-abstraction";
 import { estimateChildOperationFees } from "./child-operation-fees";
+import type { ParentAuthorizationScope } from "./parent-authorization";
+import { signWithDevice, type AuthorizedDevice } from "./parent-device-key";
 import {
   starApi,
   type ChildCredential,
@@ -50,9 +54,10 @@ export async function createChildCredential(
   return { id: credential.id, publicKey: credential.publicKey };
 }
 
-/** Sends one protocol-scoped child UserOperation using the registered passkey. */
+/** Sends a child-authorized UserOperation. Never uses the connected parent's wallet. */
 export async function sendChildIntent(
   intent: TransactionIntent,
+  authorize?: (scope: ParentAuthorizationScope) => Promise<AuthorizedDevice>,
 ): Promise<bigint> {
   if (
     intent.chainId !== sepolia.id ||
@@ -84,6 +89,14 @@ export async function sendChildIntent(
     chain: sepolia,
     transport: sepoliaTransport,
   });
+  const device = authorize
+    ? await authorize({
+        account: intent.to,
+        familyId: BigInt(metadata.familyId),
+        rpId: config.rpId,
+        client,
+      })
+    : undefined;
   const account = await toSmartAccount({
     client,
     entryPoint: {
@@ -92,7 +105,7 @@ export async function sendChildIntent(
       version: "0.8",
     },
     getAddress: async () => intent.to,
-    getFactoryArgs: async () => ({}),
+    getFactoryArgs: async () => ({}), // Already deployed by the parent during onboarding.
     getNonce: () =>
       client.readContract({
         address: entryPoint08Address,
@@ -109,7 +122,10 @@ export async function sendChildIntent(
     signTypedData: async () => {
       throw new Error("Arbitrary signatures are disabled for child accounts.");
     },
-    getStubSignature: async () => createPasskeyGasStub(config.rpId),
+    getStubSignature: async () =>
+      device
+        ? createParentSessionGasStub(device)
+        : createPasskeyGasStub(config.rpId),
     async signUserOperation(operation) {
       const hash = getUserOperationHash({
         chainId: sepolia.id,
@@ -117,6 +133,11 @@ export async function sendChildIntent(
         entryPointVersion: "0.8",
         userOperation: { ...operation, sender: intent.to },
       });
+      if (device)
+        return encodeParentSessionSignature({
+          ...device,
+          signature: await signWithDevice(device, hash),
+        });
       return signPasskeyHash(metadata.credential, config.rpId, hash);
     },
   });
