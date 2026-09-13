@@ -1,8 +1,10 @@
 "use client";
 
-import { ChevronRight, ListChecks } from "lucide-react";
+import { ChevronRight, ListChecks, Star } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
+import type { Hash } from "viem";
 import { availableStars, displayEnsName, formatUsd18 } from "@/lib/star-format";
 import {
   HomeIllustration,
@@ -13,12 +15,37 @@ import {
 import { useStarData } from "../star-data-provider";
 import { presentRecentActivities } from "../star-activity";
 import { ParentActivitySheet } from "../parent-activity-sheet";
+import {
+  ParentRewardStarsSheet,
+  type ParentChildChoice,
+} from "../parent-action-sheets";
+import { ParentActionSheet } from "../parent-action-sheet";
+import { RewardApprovalSuccess } from "../reward-approval-feedback";
 import { WalletActivitySheet } from "../wallet-activity-sheet";
 
-export function HomeDashboard() {
+export function HomeDashboard({
+  initialRewardApprovalHashes,
+}: {
+  initialRewardApprovalHashes?: readonly Hash[];
+} = {}) {
+  const router = useRouter();
   const { family, familyName, portfolio } = useStarData();
   const [activityOpen, setActivityOpen] = useState(false);
   const [walletActivityOpen, setWalletActivityOpen] = useState(false);
+  const [rewardOpen, setRewardOpen] = useState(false);
+  const [rewardApprovalOpen, setRewardApprovalOpen] = useState(
+    initialRewardApprovalHashes !== undefined,
+  );
+  const closeRewardApproval = () => {
+    setRewardApprovalOpen(false);
+    router.replace("/wallet");
+  };
+  const children: ParentChildChoice[] = (family?.children ?? [])
+    .filter((child) => child.active)
+    .map((child) => ({
+      id: child.id,
+      name: displayEnsName(child.ensName, "Child"),
+    }));
   const activities = family?.activities ?? [];
   const recentActivities = family
     ? presentRecentActivities(activities, family)
@@ -126,11 +153,43 @@ export function HomeDashboard() {
         </div>
         <ChevronRight size={18} />
       </Link>
+      <button
+        className="dashboard-action-card"
+        type="button"
+        disabled={!family?.vault || children.length === 0}
+        onClick={() => setRewardOpen(true)}
+      >
+        <span>
+          <Star size={20} fill="currentColor" />
+        </span>
+        <div>
+          <strong>Reward Stars</strong>
+          <small>Celebrate a child&apos;s progress</small>
+        </div>
+        <ChevronRight size={18} />
+      </button>
+      {rewardOpen && (
+        <ParentRewardStarsSheet
+          childChoices={children}
+          onClose={() => setRewardOpen(false)}
+        />
+      )}
       {activityOpen && (
         <ParentActivitySheet onClose={() => setActivityOpen(false)} />
       )}
       {walletActivityOpen && (
         <WalletActivitySheet onClose={() => setWalletActivityOpen(false)} />
+      )}
+      {rewardApprovalOpen && (
+        <ParentActionSheet
+          title="Reward approval"
+          onClose={closeRewardApproval}
+        >
+          <RewardApprovalSuccess
+            transactionHashes={initialRewardApprovalHashes}
+            onDone={closeRewardApproval}
+          />
+        </ParentActionSheet>
       )}
     </div>
   );
