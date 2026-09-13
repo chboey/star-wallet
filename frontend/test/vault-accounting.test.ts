@@ -19,7 +19,9 @@ test("vault details read live family accounting and label indexed withdrawal tot
 
 test("family overview keeps vault activity and technical details as separate actions", () => {
   const overview = source("components/home/screens/family-overview-screen.tsx");
-  assert.match(overview, /View vault activity/);
+  const card = source("components/home/family-vault-card.tsx");
+  assert.match(card, /Open family vault activity/);
+  assert.match(overview, /setVaultPopup\("activity"\)/);
   assert.match(overview, /On-chain details/);
   assert.match(overview, /onClick=\{openOnchainDetails\}/);
   assert.match(overview, /totalPrincipalContributed/);

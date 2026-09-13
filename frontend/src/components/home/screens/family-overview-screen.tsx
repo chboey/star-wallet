@@ -9,13 +9,19 @@ import {
 } from "@/lib/star-format";
 import { HomeIllustration, SectionEmptyState, SectionTitle } from "../home-ui";
 import { useOnchainDetailsSheet } from "../home-app-shell";
+import { FamilyVaultCard } from "../family-vault-card";
+import {
+  FamilyVaultPopup,
+  type FamilyVaultPopupView,
+} from "../family-vault-popup";
 import { useStarData } from "../star-data-provider";
-import { VaultActivitySheet } from "../vault-activity-sheet";
 
 export function FamilyOverviewScreen() {
   const { family, familyName, portfolio } = useStarData();
   const savings = family?.savings;
-  const [activityOpen, setActivityOpen] = useState(false);
+  const [vaultPopup, setVaultPopup] = useState<FamilyVaultPopupView | null>(
+    null,
+  );
   const openOnchainDetails = useOnchainDetailsSheet();
 
   return (
@@ -33,28 +39,15 @@ export function FamilyOverviewScreen() {
 
       <SectionTitle>Vault balances</SectionTitle>
       {family?.vault ? (
-        <section className="family-balance-grid">
-          <article>
-            <HomeIllustration name="usdc" alt="USDC" size={44} />
-            <span>Available USDC</span>
-            <strong>
-              {formatTokenAmount(savings?.availableUsdc, 6, 2)} USDC
-            </strong>
-          </article>
-          <article>
-            <HomeIllustration name="weth" alt="WETH" size={44} />
-            <span>Available WETH</span>
-            <strong>
-              {formatTokenAmount(savings?.availableWeth, 18, 6)} WETH
-            </strong>
-          </article>
-          <button
-            className="family-activity-button"
-            type="button"
-            onClick={() => setActivityOpen(true)}
-          >
-            View vault activity
-          </button>
+        <>
+          <FamilyVaultCard
+            familyName={familyName}
+            usdc={formatTokenAmount(savings?.availableUsdc, 6, 2)}
+            weth={formatTokenAmount(savings?.availableWeth, 18, 6)}
+            fundingDisabled={!family.active}
+            onOpenActivity={() => setVaultPopup("activity")}
+            onAddWeth={() => setVaultPopup("funding")}
+          />
           <button
             className="family-onchain-button"
             type="button"
@@ -62,7 +55,7 @@ export function FamilyOverviewScreen() {
           >
             On-chain details <ChevronRight size={15} aria-hidden="true" />
           </button>
-        </section>
+        </>
       ) : (
         <SectionEmptyState />
       )}
@@ -100,9 +93,11 @@ export function FamilyOverviewScreen() {
       ) : (
         <SectionEmptyState />
       )}
-      {activityOpen && (
-        <VaultActivitySheet onClose={() => setActivityOpen(false)} />
-      )}
+      <FamilyVaultPopup
+        key={`family-vault-${family?.vault?.id ?? "none"}`}
+        view={vaultPopup}
+        onClose={() => setVaultPopup(null)}
+      />
     </div>
   );
 }

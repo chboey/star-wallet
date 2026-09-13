@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { childAccountAbi } from "@star/contracts/abi";
+import {
+  childAccountAbi,
+  familyVaultAbi,
+  registryAbi,
+} from "@star/contracts/abi";
 import { useQueryClient } from "@tanstack/react-query";
-import { decodeFunctionData, type Hash } from "viem";
+import { decodeFunctionData, erc20Abi, formatUnits, type Hash } from "viem";
 import { sepolia } from "viem/chains";
 import {
   useAccount,
@@ -40,6 +44,7 @@ import {
   waitForParentTransaction,
 } from "@/lib/parent-transactions";
 import { refreshAfterWalletAction } from "@/lib/wallet-refresh";
+import { validateWethFundingIntents } from "@/lib/weth-funding";
 import { useParentAuthorization } from "./parent-authorization-provider";
 import { useStarData } from "./star-data-provider";
 
@@ -148,6 +153,61 @@ export function useStarIntents() {
           goalId: body.goalId,
           amount: body.amount,
         });
+      if (action === "fundWeth") {
+        if (
+          signerRole !== "PARENT" ||
+          !family?.active ||
+          !family.vault ||
+          !("amountWethUnits" in body) ||
+          body.familyId !== family.id
+        )
+          throw new Error("Select an active family vault before adding WETH.");
+        const vault = family.vault.id;
+        const [weth, registry, familyId] = await Promise.all([
+          publicClient.readContract({
+            address: vault,
+            abi: familyVaultAbi,
+            functionName: "weth",
+          }),
+          publicClient.readContract({
+            address: vault,
+            abi: familyVaultAbi,
+            functionName: "registry",
+          }),
+          publicClient.readContract({
+            address: vault,
+            abi: familyVaultAbi,
+            functionName: "familyId",
+          }),
+        ]);
+        const registeredFamily = await publicClient.readContract({
+          address: registry,
+          abi: registryAbi,
+          functionName: "getFamily",
+          args: [familyId],
+        });
+        if (
+          registeredFamily.parent.toLowerCase() !== address!.toLowerCase() ||
+          familyId !== BigInt(family.id) ||
+          !registeredFamily.active
+        )
+          throw new Error(
+            "Connect the registered parent wallet for this family vault.",
+          );
+        const amount = BigInt(body.amountWethUnits);
+        validateWethFundingIntents(envelope, { vault, weth, amount });
+        const balance = await publicClient.readContract({
+          address: weth,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [address!],
+        });
+        if (balance < amount)
+          throw new Error("There isn’t enough WETH in your parent wallet.");
+        const displayAmount = formatUnits(amount, 18);
+        envelope.intents[0].summary = `Step 1 of 2: approve ${displayAmount} WETH for your family vault.`;
+        envelope.intents[1].summary = `Step 2 of 2: add ${displayAmount} WETH to your family vault.`;
+      }
       if ((goalRequestActions as readonly string[]).includes(action)) {
         const requestChild =
           "childId" in body
