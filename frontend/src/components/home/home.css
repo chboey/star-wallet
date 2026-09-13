@@ -1154,6 +1154,121 @@ button.dashboard-balance-card {
   font-weight: 700;
 }
 
+/* Transaction and action state */
+
+.parent-transaction-details {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  color: var(--navy);
+  text-align: center;
+}
+
+.parent-transaction-entry {
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e8e4f5;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.parent-transaction-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.parent-transaction-details .parent-transaction-row > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.parent-transaction-hash {
+  user-select: all;
+}
+
+.parent-transaction-link {
+  color: var(--purple);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.action-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  margin: 12px 0;
+  padding: 0;
+  color: var(--navy);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.action-status > svg {
+  flex: 0 0 18px;
+  margin-top: 1px;
+  color: var(--purple);
+}
+
+.action-status > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.action-status-error {
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: #b4233d;
+  background: #fff0ed;
+}
+
+.action-status-error > svg {
+  color: inherit;
+}
+
+.action-status-refresh {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  margin: -5px -5px -5px auto;
+  border: 0;
+  border-radius: 7px;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.action-status-refresh:hover:not(:disabled) {
+  background: rgba(180, 35, 61, 0.08);
+}
+
+.action-status-refresh:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 /* Profile switcher */
 
 .profile-switcher-active,

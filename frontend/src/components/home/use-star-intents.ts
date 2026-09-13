@@ -1,0 +1,172 @@
+"use client";
+
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Hash } from "viem";
+import { sepolia } from "viem/chains";
+import {
+  useAccount,
+  usePublicClient,
+  useSendTransaction,
+  useSwitchChain,
+} from "wagmi";
+import {
+  starApi,
+  type IntentAction,
+  type IntentInputs,
+  type IntentResponse,
+  type SignerRole,
+  type TransactionIntent,
+} from "@/lib/star-api";
+import { waitForIndexedBlock } from "@/lib/indexed-transaction";
+import {
+  appendTransactionHash,
+  waitForParentTransaction,
+} from "@/lib/parent-transactions";
+import { refreshAfterWalletAction } from "@/lib/wallet-refresh";
+import { useStarData } from "./star-data-provider";
+
+export type IntentOperation = { transactionHashes?: readonly Hash[] } & (
+  | { state: "idle" }
+  | { state: "signing"; message: string }
+  | { state: "indexing"; message: string }
+  | { state: "success"; message: string; indexed: boolean }
+  | { state: "error"; message: string }
+);
+
+export function useStarIntents() {
+  const { address, chainId, isConnected } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
+  const { sendTransactionAsync } = useSendTransaction();
+  const publicClient = usePublicClient({ chainId: sepolia.id });
+  const queryClient = useQueryClient();
+  const { family } = useStarData();
+  const [operation, setOperation] = useState<IntentOperation>({
+    state: "idle",
+  });
+
+  const execute = async <Action extends IntentAction>(
+    action: Action,
+    body: IntentInputs[Action],
+    signerRole: SignerRole,
+    options?: {
+      onTransactionHashes?: (hashes: readonly Hash[]) => void;
+    },
+  ): Promise<IntentResponse<Action>> => {
+    let transactionHashes: Hash[] = [];
+    const updateOperation = (next: IntentOperation) =>
+      setOperation({ ...next, transactionHashes: [...transactionHashes] });
+    const onTransactionHash = (hash: Hash) => {
+      transactionHashes = appendTransactionHash(transactionHashes, hash);
+      options?.onTransactionHashes?.([...transactionHashes]);
+      setOperation((current) => ({
+        ...current,
+        transactionHashes: [...transactionHashes],
+      }));
+    };
+
+    setOperation({ state: "signing", message: "Preparing your request…" });
+    try {
+      if (!address || !isConnected)
+        throw new Error("Connect the signing wallet first.");
+      if (!publicClient) throw new Error("The Sepolia client is unavailable.");
+      if (signerRole === "CHILD")
+        throw new Error("Use the child passkey flow for child actions.");
+      const expectedAddress =
+        signerRole === "PARENT"
+          ? family?.parent
+          : family?.vault?.emergencyAdmin;
+      if (
+        expectedAddress &&
+        expectedAddress.toLowerCase() !== address.toLowerCase()
+      )
+        throw new Error(
+          `Connect the registered ${signerRole.toLowerCase()} wallet to continue.`,
+        );
+      if (chainId !== sepolia.id)
+        await switchChainAsync({ chainId: sepolia.id });
+
+      const envelope = await starApi.intent(action, body);
+      if (
+        envelope.intents.some(
+          (intent) =>
+            intent.chainId !== sepolia.id || intent.signerRole !== signerRole,
+        )
+      )
+        throw new Error("The API returned an intent for the wrong signer.");
+
+      let receiptBlock = 0n;
+      for (const intent of envelope.intents) {
+        updateOperation({ state: "signing", message: intent.summary });
+        receiptBlock = await sendIntent(
+          intent,
+          address,
+          publicClient,
+          sendTransactionAsync,
+          onTransactionHash,
+        );
+      }
+
+      updateOperation({
+        state: "indexing",
+        message: "Transaction confirmed! Updating your wallet…",
+      });
+      const indexed = await waitForIndexedBlock(receiptBlock);
+      await refreshAfterWalletAction(
+        queryClient,
+        action,
+        {
+          familyId: family?.id ?? ("familyId" in body ? body.familyId : null),
+          childId: "childId" in body ? body.childId : undefined,
+          parent: family?.parent ?? address,
+        },
+        indexed,
+      );
+      updateOperation({
+        state: "success",
+        indexed,
+        message: indexed
+          ? "All done! Your wallet is up to date."
+          : "Transaction confirmed! Still syncing—reopen this page to check for the update.",
+      });
+      return envelope;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "The transaction could not be completed.";
+      updateOperation({ state: "error", message });
+      throw error;
+    }
+  };
+
+  return {
+    execute,
+    operation,
+    resetOperation: () => setOperation({ state: "idle" }),
+  };
+}
+
+async function sendIntent(
+  intent: TransactionIntent,
+  account: `0x${string}`,
+  publicClient: NonNullable<ReturnType<typeof usePublicClient>>,
+  sendTransaction: ReturnType<
+    typeof useSendTransaction
+  >["sendTransactionAsync"],
+  onHash: (hash: Hash) => void,
+): Promise<bigint> {
+  if (intent.chainId !== sepolia.id)
+    throw new Error(`Unexpected intent chain ${intent.chainId}.`);
+  const hash = await sendTransaction({
+    account,
+    chainId: sepolia.id,
+    to: intent.to,
+    data: intent.data,
+    value: BigInt(intent.value),
+  });
+  const receipt = await waitForParentTransaction(publicClient, hash, onHash);
+  if (receipt.status !== "success")
+    throw new Error(`${intent.summary} reverted.`);
+  return receipt.blockNumber;
+}
