@@ -28,6 +28,7 @@ import {
   type ParentChildChoice,
 } from "../parent-action-sheets";
 import { ParentActionSheet } from "../parent-action-sheet";
+import { QuestForm } from "../quest-inbox";
 import { RewardApprovalSuccess } from "../reward-approval-feedback";
 import { WalletActivitySheet } from "../wallet-activity-sheet";
 
@@ -49,6 +50,7 @@ export function HomeDashboard({
   const [activityOpen, setActivityOpen] = useState(false);
   const [walletActivityOpen, setWalletActivityOpen] = useState(false);
   const [rewardOpen, setRewardOpen] = useState(false);
+  const [questOpen, setQuestOpen] = useState(false);
   const [goalRequestId, setGoalRequestId] = useState<string | null>(null);
   const [rewardApprovalOpen, setRewardApprovalOpen] = useState(
     initialRewardApprovalHashes !== undefined,
@@ -249,6 +251,21 @@ export function HomeDashboard({
       <button
         className="dashboard-action-card"
         type="button"
+        disabled={!family?.active || !family.vault || children.length === 0}
+        onClick={() => setQuestOpen(true)}
+      >
+        <span>
+          <ListChecks size={20} />
+        </span>
+        <div>
+          <strong>Assign a quest</strong>
+          <small>Choose a preset or create your own</small>
+        </div>
+        <ChevronRight size={18} />
+      </button>
+      <button
+        className="dashboard-action-card"
+        type="button"
         disabled={!family?.vault || children.length === 0}
         onClick={() => setRewardOpen(true)}
       >
@@ -266,6 +283,9 @@ export function HomeDashboard({
           childChoices={children}
           onClose={() => setRewardOpen(false)}
         />
+      )}
+      {questOpen && (
+        <QuestForm childOnly={false} onClose={() => setQuestOpen(false)} />
       )}
       {goalRequestId && (
         <GoalRequestSheet

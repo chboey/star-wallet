@@ -34,6 +34,7 @@ import {
   validateGoalRequestIntents,
 } from "@/lib/goal-request-intents";
 import { waitForIndexedBlock } from "@/lib/indexed-transaction";
+import { validateQuestIntents } from "@/lib/quest-intents";
 import {
   appendTransactionHash,
   waitForParentTransaction,
@@ -200,6 +201,7 @@ export function useStarIntents() {
             );
         }
       }
+      validateQuestIntents(action, body, envelope, family, child);
       if (
         envelope.intents.some(
           (intent) =>

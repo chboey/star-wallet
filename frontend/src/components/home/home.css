@@ -2518,6 +2518,31 @@ button.kid-hero-card {
   flex-shrink: 0;
 }
 
+/* Quest assignment */
+
+.quest-assigned-success {
+  padding: 8px 0 0;
+  display: grid;
+  gap: 20px;
+}
+
+.quest-assigned-success > [role="status"] {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.quest-assigned-success > [role="status"] p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.quest-assigned-success > .filled-action-button {
+  width: 100%;
+}
+
 @media (max-width: 520px) {
   .wallet-app-page {
     min-height: 100svh;
