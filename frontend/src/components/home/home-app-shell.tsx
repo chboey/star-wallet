@@ -3,9 +3,16 @@
 import { Cloud, House, UserRound, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type ReactNode, useEffect } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { clearWalletSelection } from "@/lib/wallet-context";
 import { readActiveProfile, saveActiveProfile } from "./active-profile";
+import { OnchainDetailsSheet } from "./onchain-details-sheet";
 import { StarDataBoundary, useStarData } from "./star-data-provider";
 import { WalletRefreshStatus } from "./home-ui";
 import { ParentAuthorizationProvider } from "./parent-authorization-provider";
@@ -22,6 +29,15 @@ const kidNavigation = [
   { href: "/wallet/kid/profile", label: "Profile", icon: UserRound },
 ] as const;
 
+const OnchainDetailsSheetContext = createContext<(() => void) | null>(null);
+
+export function useOnchainDetailsSheet() {
+  const openOnchainDetails = useContext(OnchainDetailsSheetContext);
+  if (!openOnchainDetails)
+    throw new Error("useOnchainDetailsSheet must be used inside HomeAppShell");
+  return openOnchainDetails;
+}
+
 export function HomeAppShell({ children }: { children: ReactNode }) {
   const { loading, error, needsOnboarding, family, refreshRequested } =
     useStarData();
@@ -30,6 +46,7 @@ export function HomeAppShell({ children }: { children: ReactNode }) {
   const profilesOpen = pathname === "/wallet/profiles";
   const kidMode = pathname.startsWith("/wallet/kid");
   const navigation = kidMode ? kidNavigation : parentNavigation;
+  const [onchainDetailsOpen, setOnchainDetailsOpen] = useState(false);
 
   useEffect(() => {
     if (loading || error) return;
@@ -47,39 +64,49 @@ export function HomeAppShell({ children }: { children: ReactNode }) {
   }, [loading, error, needsOnboarding, family, profilesOpen, kidMode, router]);
 
   return (
-    <main className="wallet-app-page">
-      <section
-        className={`wallet-app-frame ${profilesOpen ? "profile-switcher-active" : ""}`}
-      >
-        <ParentAuthorizationProvider>
-          <div className="wallet-app-scroll">
-            <StarDataBoundary>{children}</StarDataBoundary>
-          </div>
-          <WalletRefreshStatus requested={!loading && refreshRequested} />
-          {!profilesOpen && !loading && !needsOnboarding && family && (
-            <nav
-              className={`wallet-bottom-nav ${kidMode ? "kid-bottom-nav" : ""}`}
-              aria-label="Star Wallet navigation"
-            >
-              {navigation.map(({ href, label, icon: Icon }) => {
-                const active = isActivePath(pathname, href);
-                return (
-                  <Link
-                    className={active ? "active" : ""}
-                    href={href}
-                    key={href}
-                    aria-current={active ? "page" : undefined}
-                  >
-                    <Icon size={22} strokeWidth={active ? 2.6 : 2.1} />
-                    <span>{label}</span>
-                  </Link>
-                );
-              })}
-            </nav>
-          )}
-        </ParentAuthorizationProvider>
-      </section>
-    </main>
+    <OnchainDetailsSheetContext.Provider
+      value={() => setOnchainDetailsOpen(true)}
+    >
+      <main className="wallet-app-page">
+        <section
+          className={`wallet-app-frame ${profilesOpen ? "profile-switcher-active" : ""}`}
+        >
+          <ParentAuthorizationProvider>
+            <div className="wallet-app-scroll">
+              <StarDataBoundary>{children}</StarDataBoundary>
+            </div>
+            <WalletRefreshStatus requested={!loading && refreshRequested} />
+            {!profilesOpen && !loading && !needsOnboarding && family && (
+              <nav
+                className={`wallet-bottom-nav ${kidMode ? "kid-bottom-nav" : ""}`}
+                aria-label="Star Wallet navigation"
+              >
+                {navigation.map(({ href, label, icon: Icon }) => {
+                  const active = isActivePath(pathname, href);
+                  return (
+                    <Link
+                      className={active ? "active" : ""}
+                      href={href}
+                      key={href}
+                      aria-current={active ? "page" : undefined}
+                    >
+                      <Icon size={22} strokeWidth={active ? 2.6 : 2.1} />
+                      <span>{label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            )}
+            {onchainDetailsOpen && !kidMode && (
+              <OnchainDetailsSheet
+                key={family?.vault?.id}
+                onClose={() => setOnchainDetailsOpen(false)}
+              />
+            )}
+          </ParentAuthorizationProvider>
+        </section>
+      </main>
+    </OnchainDetailsSheetContext.Provider>
   );
 }
 

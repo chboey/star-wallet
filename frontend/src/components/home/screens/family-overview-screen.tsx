@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import {
   displayEnsName,
@@ -7,6 +8,7 @@ import {
   formatUsd18,
 } from "@/lib/star-format";
 import { HomeIllustration, SectionEmptyState, SectionTitle } from "../home-ui";
+import { useOnchainDetailsSheet } from "../home-app-shell";
 import { useStarData } from "../star-data-provider";
 import { VaultActivitySheet } from "../vault-activity-sheet";
 
@@ -14,6 +16,7 @@ export function FamilyOverviewScreen() {
   const { family, familyName, portfolio } = useStarData();
   const savings = family?.savings;
   const [activityOpen, setActivityOpen] = useState(false);
+  const openOnchainDetails = useOnchainDetailsSheet();
 
   return (
     <div className="wallet-screen family-overview-screen">
@@ -51,6 +54,13 @@ export function FamilyOverviewScreen() {
             onClick={() => setActivityOpen(true)}
           >
             View vault activity
+          </button>
+          <button
+            className="family-onchain-button"
+            type="button"
+            onClick={openOnchainDetails}
+          >
+            On-chain details <ChevronRight size={15} aria-hidden="true" />
           </button>
         </section>
       ) : (

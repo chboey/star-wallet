@@ -905,6 +905,7 @@ button.kid-hero-card {
 }
 
 .family-activity-button,
+.family-onchain-button,
 .kid-activity-link {
   min-height: 40px;
   border: 0;
@@ -916,8 +917,12 @@ button.kid-hero-card {
   font-weight: 800;
 }
 
-.family-activity-button {
-  grid-column: 1 / -1;
+.family-activity-button,
+.family-onchain-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .kid-activity-link {
@@ -927,6 +932,59 @@ button.kid-hero-card {
   align-items: center;
   justify-content: center;
   gap: 4px;
+}
+
+.onchain-detail-list {
+  margin: 8px 0 0;
+}
+
+.onchain-detail-list > div {
+  min-height: 48px;
+  padding: 10px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid #efecf7;
+}
+
+.onchain-detail-list > div:last-child {
+  border-bottom: 0;
+}
+
+.onchain-detail-list dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.onchain-detail-list dd {
+  min-width: 0;
+  max-width: 65%;
+  margin: 0;
+  color: var(--navy);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.onchain-detail-list code,
+.onchain-detail-list a {
+  color: var(--purple);
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.onchain-detail-list a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.onchain-details-note {
+  margin: 13px 2px 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 /* Activity sheets */
