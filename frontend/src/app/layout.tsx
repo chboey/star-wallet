@@ -10,6 +10,7 @@ import "@/components/onboarding/styles/shared.css";
 import "@/components/onboarding/styles/welcome.css";
 import "@/components/onboarding/styles/wallet.css";
 import "@/components/onboarding/styles/family.css";
+import "@/components/home/home.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
