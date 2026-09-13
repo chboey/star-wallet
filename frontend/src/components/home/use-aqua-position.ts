@@ -3,23 +3,32 @@
 import { useQuery } from "@tanstack/react-query";
 import { sepolia } from "viem/chains";
 import { usePublicClient } from "wagmi";
-import { aquaPositionKey, readAquaPosition } from "@/lib/aqua-position";
+import {
+  aquaPositionKey,
+  aquaTopUpKey,
+  readAquaPosition,
+  readAquaTopUpPosition,
+} from "@/lib/aqua-position";
 import { starReadOptions } from "@/lib/wallet-refresh";
 import { useStarData } from "./star-data-provider";
 import { useReadOnEntry } from "./use-read-on-entry";
 
-export function useAquaPosition() {
+export function useAquaPosition({
+  forTopUp = false,
+}: { forTopUp?: boolean } = {}) {
   const { family } = useStarData();
   const client = usePublicClient({ chainId: sepolia.id });
   const vault = family?.vault?.id;
-  const queryKey = aquaPositionKey(vault);
+  const queryKey = forTopUp ? aquaTopUpKey(vault) : aquaPositionKey(vault);
   const enabled = Boolean(vault && client);
   const query = useQuery({
     queryKey,
     queryFn: () => {
       if (!client || !vault)
         throw new Error("The family vault is unavailable.");
-      return readAquaPosition(client, vault);
+      return forTopUp
+        ? readAquaTopUpPosition(client, vault)
+        : readAquaPosition(client, vault);
     },
     enabled,
     ...starReadOptions,

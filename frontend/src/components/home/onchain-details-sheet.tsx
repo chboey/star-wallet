@@ -1,19 +1,41 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sepolia } from "viem/chains";
 import { formatTokenAmount, shortHex } from "@/lib/star-format";
+import type { SelectedAquaPosition } from "@/lib/aqua-position";
 import { ActionStatus } from "./action-status";
 import { useStarData } from "./star-data-provider";
 import { useAquaPosition } from "./use-aqua-position";
+import { AquaPositionOptions } from "./aqua-position-options";
+import { CloseAquaPositionSheet } from "./close-aqua-position-sheet";
+import { AquaPositionSetupSheet } from "./aqua-position-setup-sheet";
 
-export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
+export function OnchainDetailsSheet({
+  onClose,
+  canManage = false,
+}: {
+  onClose: () => void;
+  canManage?: boolean;
+}) {
   const { family } = useStarData();
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const live = useAquaPosition();
-  const savings = family?.savings;
+  const busy = live.isFetching;
+  const [closingPosition, setClosingPosition] =
+    useState<SelectedAquaPosition | null>(null);
+  const [addingPosition, setAddingPosition] =
+    useState<SelectedAquaPosition | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const position =
+    family?.savings.activePosition?.strategyHash.toLowerCase() ===
+    live.data?.strategyHash.toLowerCase()
+      ? family?.savings.activePosition
+      : undefined;
+  const latestExecution = position?.executions?.[0];
   const explorer = sepolia.blockExplorers.default.url;
+  const latestTransaction =
+    latestExecution?.transactionHash ?? family?.vault?.updatedTransactionHash;
   const details = [
     { label: "Network", value: "Ethereum Sepolia (testnet)", code: false },
     {
@@ -24,28 +46,6 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
     {
       label: "In position",
       value: `${formatTokenAmount(live.data?.positionUsdc, 6, 6)} USDC · ${formatTokenAmount(live.data?.positionWeth, 18, 18)} WETH`,
-      code: false,
-    },
-    {
-      label: "Principal contributed",
-      value: `${formatTokenAmount(live.data?.totalPrincipalContributed, 6, 6)} USDC`,
-      code: false,
-    },
-    {
-      label: "Principal withdrawn",
-      value: `${formatTokenAmount(live.data?.totalPrincipalWithdrawn, 6, 6)} USDC`,
-      code: false,
-    },
-    {
-      label: "Net principal",
-      value: `${formatTokenAmount(
-        live.data
-          ? live.data.totalPrincipalContributed -
-              live.data.totalPrincipalWithdrawn
-          : undefined,
-        6,
-        6,
-      )} USDC`,
       code: false,
     },
     {
@@ -62,16 +62,6 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
       code: false,
     },
     {
-      label: "Total USDC withdrawn",
-      value: `${formatTokenAmount(savings?.totalUsdcWithdrawn, 6, 6)} USDC`,
-      code: false,
-    },
-    {
-      label: "Total WETH withdrawn",
-      value: `${formatTokenAmount(savings?.totalWethWithdrawn, 18, 18)} WETH`,
-      code: false,
-    },
-    {
       label: "Vault contract",
       value: shortHex(family?.vault?.id),
       code: true,
@@ -80,11 +70,36 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
         : undefined,
     },
     {
-      label: "Latest indexed transaction",
-      value: shortHex(family?.vault?.updatedTransactionHash),
+      label: "Strategy hash",
+      value: shortHex(
+        live.data?.positionActive ? live.data.strategyHash : undefined,
+      ),
       code: true,
-      href: family?.vault?.updatedTransactionHash
-        ? `${explorer}/tx/${family.vault.updatedTransactionHash}`
+      // A strategy hash is not a transaction hash. Show its Aqua event logs,
+      // or the vault's readable contract state while the indexer catches up.
+      href: live.data?.positionActive
+        ? latestExecution
+          ? `${explorer}/tx/${latestExecution.transactionHash}#eventlog`
+          : `${explorer}/address/${live.data.vault}#readContract`
+        : undefined,
+      title: latestExecution
+        ? "View this strategy’s Aqua event logs on Sepolia Etherscan"
+        : "View the active strategy in the vault contract on Sepolia Etherscan",
+    },
+    {
+      label: "Aqua maker",
+      value: shortHex(live.data?.positionActive ? live.data.vault : undefined),
+      code: true,
+      href: live.data?.positionActive
+        ? `${explorer}/address/${live.data.vault}`
+        : undefined,
+    },
+    {
+      label: "Latest indexed transaction",
+      value: shortHex(latestTransaction),
+      code: true,
+      href: latestTransaction
+        ? `${explorer}/tx/${latestTransaction}`
         : undefined,
     },
     {
@@ -100,13 +115,32 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
   ];
 
   useEffect(() => {
+    if ((closingPosition || addingPosition) && canManage) return;
     closeButtonRef.current?.focus();
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", closeWithEscape);
     return () => document.removeEventListener("keydown", closeWithEscape);
-  }, [onClose]);
+  }, [onClose, closingPosition, addingPosition, canManage]);
+
+  if (addingPosition && canManage)
+    return (
+      <AquaPositionSetupSheet
+        selected={addingPosition}
+        onClose={() => setAddingPosition(null)}
+        onDetails={() => setAddingPosition(null)}
+      />
+    );
+
+  if (closingPosition && canManage)
+    return (
+      <CloseAquaPositionSheet
+        selected={closingPosition}
+        onClose={() => setClosingPosition(null)}
+        onDone={onClose}
+      />
+    );
 
   return (
     <>
@@ -123,7 +157,27 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
         aria-labelledby="onchain-details-title"
       >
         <header className="add-funds-sheet-header">
-          <span aria-hidden="true" />
+          {canManage ? (
+            <AquaPositionOptions
+              disabled={busy || live.isError || !live.data?.positionActive}
+              onAddPosition={() => {
+                if (!busy && !live.isError && live.data?.positionActive)
+                  setAddingPosition({
+                    vault: live.data.vault,
+                    strategyHash: live.data.strategyHash,
+                  });
+              }}
+              onClosePosition={() => {
+                if (!busy && !live.isError && live.data?.positionActive)
+                  setClosingPosition({
+                    vault: live.data.vault,
+                    strategyHash: live.data.strategyHash,
+                  });
+              }}
+            />
+          ) : (
+            <span aria-hidden="true" />
+          )}
           <h2 id="onchain-details-title">On-chain details</h2>
           <button
             ref={closeButtonRef}
@@ -137,13 +191,13 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
         {live.isError && (
           <ActionStatus
             state="error"
-            message="Couldn’t refresh the on-chain vault account. Indexed withdrawal totals may still be available."
+            message="Couldn’t refresh the on-chain state. Displayed values may be out of date."
             onRefresh={() => void live.refetch()}
-            refreshing={live.isFetching}
+            refreshing={busy}
           />
         )}
         <dl className="onchain-detail-list">
-          {details.map(({ label, value, code, href }) => (
+          {details.map(({ label, value, code, href, title }) => (
             <div key={label}>
               <dt>{label}</dt>
               <dd>
@@ -152,7 +206,11 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label={`View ${label.toLowerCase()} on Sepolia Etherscan (opens in a new tab)`}
+                    title={
+                      title ??
+                      `View ${label.toLowerCase()} on Sepolia Etherscan`
+                    }
+                    aria-label={`${title ?? `View ${label.toLowerCase()} on Sepolia Etherscan`} (opens in a new tab)`}
                   >
                     <code>{value}</code>
                   </a>
@@ -166,9 +224,8 @@ export function OnchainDetailsSheet({ onClose }: { onClose: () => void }) {
           ))}
         </dl>
         <p className="onchain-details-note">
-          Vault balances and principal accounting are checked directly on
-          Sepolia. Withdrawal totals and transaction details follow the latest
-          indexed snapshot.
+          Balances and position status are checked directly on Sepolia. Indexed
+          transaction details can take a little longer to update.
         </p>
       </section>
     </>

@@ -10,12 +10,12 @@ import {
   useEffect,
   useState,
 } from "react";
-import { clearWalletSelection } from "@/lib/wallet-context";
 import { readActiveProfile, saveActiveProfile } from "./active-profile";
 import { OnchainDetailsSheet } from "./onchain-details-sheet";
 import { StarDataBoundary, useStarData } from "./star-data-provider";
 import { WalletRefreshStatus } from "./home-ui";
 import { ParentAuthorizationProvider } from "./parent-authorization-provider";
+import { clearWalletSelection } from "@/lib/wallet-context";
 
 const parentNavigation = [
   { href: "/wallet", label: "Home", icon: House },
@@ -55,13 +55,27 @@ export function HomeAppShell({ children }: { children: ReactNode }) {
       router.replace("/onboarding");
       return;
     }
-    if (!family || profilesOpen) return;
+    if (!family) return;
+    if (profilesOpen) return;
+
     if (kidMode) {
       saveActiveProfile("child");
       return;
     }
-    if (readActiveProfile() === "child") router.replace("/wallet/kid");
-  }, [loading, error, needsOnboarding, family, profilesOpen, kidMode, router]);
+
+    if (readActiveProfile() === "child") {
+      router.replace("/wallet/kid");
+    }
+  }, [
+    loading,
+    error,
+    needsOnboarding,
+    family,
+    kidMode,
+    pathname,
+    profilesOpen,
+    router,
+  ]);
 
   return (
     <OnchainDetailsSheetContext.Provider
@@ -97,9 +111,10 @@ export function HomeAppShell({ children }: { children: ReactNode }) {
                 })}
               </nav>
             )}
-            {onchainDetailsOpen && !kidMode && (
+            {onchainDetailsOpen && (
               <OnchainDetailsSheet
                 key={family?.vault?.id}
+                canManage={!kidMode}
                 onClose={() => setOnchainDetailsOpen(false)}
               />
             )}

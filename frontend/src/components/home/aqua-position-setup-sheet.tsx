@@ -5,6 +5,9 @@ import { useAccount } from "wagmi";
 import {
   parsePositionAmount,
   validatePositionAmounts,
+  validateTopUpPositionState,
+  validateTopUpAmounts,
+  type SelectedAquaPosition,
 } from "@/lib/aqua-position";
 import { displayEnsName } from "@/lib/star-format";
 import { IntentStatus } from "./action-status";
@@ -22,28 +25,31 @@ import {
 export function AquaPositionSetupSheet({
   onClose,
   onDetails,
+  selected,
 }: {
   onClose: () => void;
   onDetails: () => void;
+  selected?: SelectedAquaPosition;
 }) {
   const { family } = useStarData();
   const { address, isConnected } = useAccount();
-  const position = useAquaPosition();
+  const position = useAquaPosition({ forTopUp: Boolean(selected) });
   const { execute, operation, resetOperation } = useStarIntents();
   const [step, setStep] = useState<SetupStep>("amounts");
   const [funding, setFunding] = useState<"weth" | "usdc" | null>(null);
-  const [usdc, setUsdc] = useState("");
-  const [weth, setWeth] = useState("");
+  const [usdc, setUsdc] = useState(selected ? "0" : "");
+  const [weth, setWeth] = useState(selected ? "0" : "");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const ready =
     step === "complete" ||
-    (!busy &&
+    (!selected &&
+      !busy &&
       !position.isError &&
       !position.isFetching &&
       position.data?.positionActive === true);
-  const unavailable =
+  let unavailable =
     !family?.active || !family.vault
       ? "An active family vault is needed to add savings."
       : !isConnected || address?.toLowerCase() !== family.parent.toLowerCase()
@@ -51,6 +57,14 @@ export function AquaPositionSetupSheet({
         : position.data?.paused
           ? "Aqua is paused for this vault. Adding savings is unavailable."
           : undefined;
+  if (!unavailable && selected && position.data) {
+    try {
+      validateTopUpPositionState(position.data, selected);
+    } catch (cause) {
+      unavailable =
+        cause instanceof Error ? cause.message : "Check this position again.";
+    }
+  }
 
   const close = () => {
     if (!lock.current) onClose();
@@ -75,10 +89,21 @@ export function AquaPositionSetupSheet({
     let amounts: { usdc: bigint; weth: bigint };
     try {
       amounts = {
-        usdc: parsePositionAmount(usdc, "USDC"),
-        weth: parsePositionAmount(weth, "WETH"),
+        usdc: parsePositionAmount(
+          selected ? usdc.trim() || "0" : usdc,
+          "USDC",
+          Boolean(selected),
+        ),
+        weth: parsePositionAmount(
+          selected ? weth.trim() || "0" : weth,
+          "WETH",
+          Boolean(selected),
+        ),
       };
-      validatePositionAmounts(position.data, amounts.usdc, amounts.weth);
+      if (selected) {
+        validateTopUpPositionState(position.data, selected);
+        validateTopUpAmounts(position.data, amounts.usdc, amounts.weth);
+      } else validatePositionAmounts(position.data, amounts.usdc, amounts.weth);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -95,16 +120,29 @@ export function AquaPositionSetupSheet({
     lock.current = true;
     setBusy(true);
     try {
-      await execute(
-        "shipSavings",
-        {
-          familyId: family.id,
-          usdcAmountUnits: amounts.usdc.toString(),
-          wethAmountUnits: amounts.weth.toString(),
-          feeBps: 30,
-        },
-        "PARENT",
-      );
+      if (selected)
+        await execute(
+          "addSavings",
+          {
+            familyId: family.id,
+            expectedStrategyHash: selected.strategyHash,
+            usdcAmountUnits: amounts.usdc.toString(),
+            wethAmountUnits: amounts.weth.toString(),
+          },
+          "PARENT",
+          { expectedPosition: selected },
+        );
+      else
+        await execute(
+          "shipSavings",
+          {
+            familyId: family.id,
+            usdcAmountUnits: amounts.usdc.toString(),
+            wethAmountUnits: amounts.weth.toString(),
+            feeBps: 30,
+          },
+          "PARENT",
+        );
       setStep("complete");
     } catch {
       // Cancellation and failed transactions remain on Review with a retryable error.
@@ -145,7 +183,13 @@ export function AquaPositionSetupSheet({
 
   return (
     <ParentActionSheet
-      title={ready ? "Star savings" : "Create Aqua position"}
+      title={
+        ready
+          ? "Star savings"
+          : selected
+            ? "Add to position"
+            : "Create Aqua position"
+      }
       className="aqua-setup-sheet"
       onClose={close}
       onBack={
@@ -160,6 +204,7 @@ export function AquaPositionSetupSheet({
       }
     >
       <AquaPositionSetupContent
+        mode={selected ? "top-up" : "create"}
         step={ready ? "complete" : step}
         snapshot={position.data}
         usdc={usdc}

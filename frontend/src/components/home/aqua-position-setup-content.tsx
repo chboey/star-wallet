@@ -13,6 +13,7 @@ export type SetupStep = "amounts" | "review" | "complete";
 
 /** Keep each step renderable without a wallet for layout and interaction tests. */
 export function AquaPositionSetupContent({
+  mode = "create",
   step,
   snapshot,
   usdc,
@@ -28,6 +29,7 @@ export function AquaPositionSetupContent({
   onSubmit,
   onDone,
 }: {
+  mode?: "create" | "top-up";
   step: SetupStep;
   snapshot?: AquaPositionSnapshot;
   usdc: string;
@@ -44,13 +46,22 @@ export function AquaPositionSetupContent({
   onDone: () => void;
   onDetails: () => void;
 }) {
+  const topUp = mode === "top-up";
   if (step === "complete")
     return (
       <div className="aqua-setup-content aqua-setup-success">
         <div role="status">
           <KidIllustration name="purple_tick" alt="" size={144} />
-          <h3>Your Aqua position is active</h3>
-          <p>Your Star savings position is ready.</p>
+          <h3>
+            {topUp
+              ? "Added to your savings position"
+              : "Your Aqua position is active"}
+          </h3>
+          <p>
+            {topUp
+              ? "Your vault funds were added to the same Aqua position."
+              : "Your Star savings position is ready."}
+          </p>
         </div>
         <ParentTransactionDetails
           hashes={transactionHashes}
@@ -64,30 +75,39 @@ export function AquaPositionSetupContent({
   return (
     <form className="aqua-setup-content" onSubmit={onSubmit} aria-busy={busy}>
       <ol className="aqua-setup-steps" aria-label="Position setup progress">
-        {(["Choose amounts", "Review & create"] as const).map(
-          (label, index) => (
-            <li
-              key={label}
-              aria-current={
-                (step === "amounts" ? 0 : 1) === index ? "step" : undefined
-              }
-            >
-              <span>{index + 1}</span>
-              {label}
-            </li>
-          ),
-        )}
+        {(
+          [
+            "Choose amounts",
+            topUp ? "Review & add" : "Review & create",
+          ] as const
+        ).map((label, index) => (
+          <li
+            key={label}
+            aria-current={
+              (step === "amounts" ? 0 : 1) === index ? "step" : undefined
+            }
+          >
+            <span>{index + 1}</span>
+            {label}
+          </li>
+        ))}
       </ol>
       <div className="aqua-setup-intro">
         <h3>
           {step === "amounts"
             ? "Choose what to put in"
-            : "Review your position"}
+            : topUp
+              ? "Review your top-up"
+              : "Review your position"}
         </h3>
         <p>
           {step === "amounts"
-            ? "Use USDC and WETH already in your family vault."
-            : "These amounts will be allocated from your vault to Aqua."}
+            ? topUp
+              ? "Use USDC or WETH already in your family vault."
+              : "Use USDC and WETH already in your family vault."
+            : topUp
+              ? "These funds go into the same Aqua position. No new wallet deposit or token approval is needed."
+              : "These amounts will be allocated from your vault to Aqua."}
         </p>
       </div>
       {step === "amounts" ? (
@@ -102,7 +122,18 @@ export function AquaPositionSetupContent({
             const limit =
               snapshot &&
               (token === "USDC" ? snapshot.maxUsdc : snapshot.maxWeth);
-            const cap = limit !== undefined ? limit : undefined;
+            const held = !topUp
+              ? 0n
+              : snapshot &&
+                (token === "USDC"
+                  ? snapshot.positionUsdc
+                  : snapshot.positionWeth);
+            const cap =
+              limit !== undefined && held !== undefined
+                ? limit > held
+                  ? limit - held
+                  : 0n
+                : undefined;
             const max =
               balance !== undefined && cap !== undefined
                 ? balance < cap
@@ -163,7 +194,8 @@ export function AquaPositionSetupContent({
                   cap !== undefined &&
                   cap < balance && (
                     <p className="aqua-setup-note">
-                      Position limit: {formatUnits(cap, decimals)} {token}
+                      {topUp ? "Remaining position capacity" : "Position limit"}
+                      : {formatUnits(cap, decimals)} {token}
                     </p>
                   )}
                 {balance === 0n && (
@@ -203,7 +235,7 @@ export function AquaPositionSetupContent({
           </div>
           <div>
             <dt>Trading fee</dt>
-            <dd>0.3%</dd>
+            <dd>{topUp && snapshot ? snapshot.positionFeeBps / 100 : 0.3}%</dd>
           </div>
           {/* {topUp && (
             <div>
@@ -239,17 +271,25 @@ export function AquaPositionSetupContent({
             busy ||
             checking ||
             disabled ||
-            !usdc.trim() ||
-            !weth.trim() ||
-            snapshot?.availableUsdc === 0n ||
-            snapshot?.availableWeth === 0n
+            (topUp
+              ? (!usdc.trim() && !weth.trim()) ||
+                (snapshot?.availableUsdc === 0n &&
+                  snapshot?.availableWeth === 0n)
+              : !usdc.trim() ||
+                !weth.trim() ||
+                snapshot?.availableUsdc === 0n ||
+                snapshot?.availableWeth === 0n)
           }
           aria-busy={busy || checking}
         >
           {(busy || checking) && (
             <LoaderCircle className="spin" size={18} aria-hidden="true" />
           )}
-          {step === "amounts" ? "Continue" : "Create Aqua position"}
+          {step === "amounts"
+            ? "Continue"
+            : topUp
+              ? "Add to this position"
+              : "Create Aqua position"}
         </button>
       </footer>
     </form>

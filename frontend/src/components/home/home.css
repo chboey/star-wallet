@@ -4175,3 +4175,105 @@ button.kid-hero-card {
     display: none;
   }
 }
+
+/* Aqua position management */
+
+.aqua-position-options {
+  position: relative;
+}
+
+.aqua-position-options > button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.aqua-position-options-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 230px;
+  max-width: calc(100cqw - 40px);
+  padding: 6px;
+  border: 1px solid var(--lavender-line);
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 10px 30px rgba(37, 19, 91, 0.16);
+}
+
+.aqua-position-options .aqua-position-options-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: var(--navy);
+  background: white;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.aqua-position-options .aqua-position-options-item:hover,
+.aqua-position-options .aqua-position-options-item:focus-visible {
+  color: var(--purple);
+  background: #f7f4ff;
+}
+
+.aqua-position-options-item > svg {
+  flex-shrink: 0;
+}
+
+.close-aqua-position-content,
+.close-aqua-position-actions {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.close-aqua-position-content {
+  padding: 8px 0 0;
+}
+
+.close-aqua-position-hero {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.close-aqua-position-hero > img {
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.close-aqua-position-hero h3 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.close-aqua-position-hero p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.close-aqua-position-hero[role="status"] h3,
+.close-aqua-position-hero[role="status"] p {
+  font-weight: 600;
+}
+
+.close-aqua-position-actions > .action-status {
+  margin: 0;
+}
+
+.close-aqua-position-actions > .filled-action-button {
+  width: 100%;
+  min-height: 50px;
+}

@@ -375,7 +375,7 @@ test("family gate and details use the live active flag, not positive indexed hol
   assert.match(details, /live\.data\.positionActive/);
   assert.match(details, /Checked on-chain block/);
   assert.match(details, /Latest indexed transaction/);
-  assert.doesNotMatch(details, /<AquaPositionOptions/);
+  assert.match(details, /<AquaPositionOptions/);
   assert.doesNotMatch(details, /aria-label="Refresh wallet"/);
 });
 

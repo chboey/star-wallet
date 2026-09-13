@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { decodeFunctionData, erc20Abi, formatUnits, type Hash } from "viem";
 import {
   childAccountAbi,
   familyVaultAbi,
   registryAbi,
 } from "@star/contracts/abi";
-import { useQueryClient } from "@tanstack/react-query";
-import { decodeFunctionData, erc20Abi, formatUnits, type Hash } from "viem";
 import { sepolia } from "viem/chains";
 import {
   useAccount,
@@ -23,18 +23,36 @@ import {
   type SignerRole,
   type TransactionIntent,
 } from "@/lib/star-api";
+import { useStarData } from "./star-data-provider";
 import { sendChildIntent } from "@/lib/child-account";
+import { useParentAuthorization } from "./parent-authorization-provider";
+import { validateQuestIntents } from "@/lib/quest-intents";
+import { validateWethFundingIntents } from "@/lib/weth-funding";
 import {
   aquaPositionKey,
+  aquaTopUpKey,
+  readAquaTopUpPosition,
+  validateTopUpPositionState,
+  validateTopUpAmounts,
+  validateAddSavingsIntents,
   readAquaPosition,
   validatePositionAmounts,
   validateShipSavingsIntents,
+  validateClosePositionState,
+  validateDockSavingsIntents,
+  type SelectedAquaPosition,
 } from "@/lib/aqua-position";
+import { refreshAfterWalletAction } from "@/lib/wallet-refresh";
+import { waitForIndexedBlock } from "@/lib/indexed-transaction";
+import {
+  appendTransactionHash,
+  waitForParentTransaction,
+} from "@/lib/parent-transactions";
 import {
   contributionAmount,
   contributionLimit,
-  goalContributionConfirmationsKey,
   goalContributionKey,
+  goalContributionConfirmationsKey,
   readGoalContribution,
   validateGoalContributionIntent,
   type GoalContributionSnapshot,
@@ -43,16 +61,6 @@ import {
   goalRequestActions,
   validateGoalRequestIntents,
 } from "@/lib/goal-request-intents";
-import { waitForIndexedBlock } from "@/lib/indexed-transaction";
-import { validateQuestIntents } from "@/lib/quest-intents";
-import {
-  appendTransactionHash,
-  waitForParentTransaction,
-} from "@/lib/parent-transactions";
-import { refreshAfterWalletAction } from "@/lib/wallet-refresh";
-import { validateWethFundingIntents } from "@/lib/weth-funding";
-import { useParentAuthorization } from "./parent-authorization-provider";
-import { useStarData } from "./star-data-provider";
 
 export type IntentOperation = { transactionHashes?: readonly Hash[] } & (
   | { state: "idle" }
@@ -67,8 +75,8 @@ export function useStarIntents() {
   const { switchChainAsync } = useSwitchChain();
   const { sendTransactionAsync } = useSendTransaction();
   const publicClient = usePublicClient({ chainId: sepolia.id });
-  const queryClient = useQueryClient();
   const { family, child } = useStarData();
+  const queryClient = useQueryClient();
   const authorizeDevice = useParentAuthorization();
   const [operation, setOperation] = useState<IntentOperation>({
     state: "idle",
@@ -79,6 +87,7 @@ export function useStarIntents() {
     body: IntentInputs[Action],
     signerRole: SignerRole,
     options?: {
+      expectedPosition?: SelectedAquaPosition;
       onTransactionHashes?: (hashes: readonly Hash[]) => void;
     },
   ): Promise<IntentResponse<Action>> => {
@@ -93,7 +102,6 @@ export function useStarIntents() {
         transactionHashes: [...transactionHashes],
       }));
     };
-
     setOperation({ state: "signing", message: "Preparing your request…" });
     try {
       if (signerRole !== "CHILD" && (!address || !isConnected))
@@ -102,18 +110,62 @@ export function useStarIntents() {
       const expectedAddress =
         signerRole === "PARENT"
           ? family?.parent
-          : family?.vault?.emergencyAdmin;
+          : signerRole === "CHILD"
+            ? child?.wallet
+            : family?.vault?.emergencyAdmin;
       if (
         signerRole !== "CHILD" &&
         expectedAddress &&
         expectedAddress.toLowerCase() !== address?.toLowerCase()
-      )
+      ) {
         throw new Error(
           `Connect the registered ${signerRole.toLowerCase()} wallet to continue.`,
         );
+      }
       if (signerRole !== "CHILD" && chainId !== sepolia.id)
         await switchChainAsync({ chainId: sepolia.id });
 
+      if (action === "dockSavings") {
+        if (
+          signerRole !== "PARENT" ||
+          !family?.vault ||
+          !("familyId" in body) ||
+          body.familyId !== family.id ||
+          !options?.expectedPosition
+        )
+          throw new Error(
+            "Select the position to close from your family's on-chain details.",
+          );
+        const state = await readAquaPosition(publicClient, family.vault.id);
+        queryClient.setQueryData(aquaPositionKey(family.vault.id), state);
+        validateClosePositionState(state, options.expectedPosition);
+      }
+      if (action === "addSavings") {
+        if (
+          signerRole !== "PARENT" ||
+          !family?.active ||
+          !family.vault ||
+          !("expectedStrategyHash" in body) ||
+          body.familyId !== family.id ||
+          !options?.expectedPosition ||
+          body.expectedStrategyHash.toLowerCase() !==
+            options.expectedPosition.strategyHash.toLowerCase()
+        )
+          throw new Error(
+            "Select the existing position from your family's on-chain details.",
+          );
+        const state = await readAquaTopUpPosition(
+          publicClient,
+          family.vault.id,
+        );
+        queryClient.setQueryData(aquaTopUpKey(family.vault.id), state);
+        validateTopUpPositionState(state, options.expectedPosition);
+        validateTopUpAmounts(
+          state,
+          BigInt(body.usdcAmountUnits),
+          BigInt(body.wethAmountUnits),
+        );
+      }
       if (action === "shipSavings") {
         if (
           signerRole !== "PARENT" ||
@@ -125,6 +177,7 @@ export function useStarIntents() {
           throw new Error(
             "Select an active family vault before creating a position.",
           );
+        // Recheck the contract before preparing a plan, even if the indexer is behind.
         const state = await readAquaPosition(publicClient, family.vault.id);
         queryClient.setQueryData(aquaPositionKey(family.vault.id), state);
         validatePositionAmounts(
@@ -133,7 +186,6 @@ export function useStarIntents() {
           BigInt(body.wethAmountUnits),
         );
       }
-
       if (action === "addStarsToGoal") {
         if (
           signerRole !== "CHILD" ||
@@ -166,26 +218,53 @@ export function useStarIntents() {
             "Check the Stars available and the amount this goal still needs.",
           );
       }
-
       const envelope = await starApi.intent(action, body);
       if (
-        action === "shipSavings" &&
+        action === "addSavings" &&
         family?.vault &&
-        "usdcAmountUnits" in body
+        options?.expectedPosition &&
+        "expectedStrategyHash" in body
       ) {
-        const strategy = validateShipSavingsIntents(envelope, {
-          vault: family.vault.id,
-          usdc: BigInt(body.usdcAmountUnits),
-          weth: BigInt(body.wethAmountUnits),
+        const usdc = BigInt(body.usdcAmountUnits);
+        const weth = BigInt(body.wethAmountUnits);
+        validateAddSavingsIntents(envelope, {
+          ...options.expectedPosition,
+          usdc,
+          weth,
         });
-        const parameters = await publicClient.readContract({
+        const state = await readAquaTopUpPosition(
+          publicClient,
+          family.vault.id,
+        );
+        queryClient.setQueryData(aquaTopUpKey(family.vault.id), state);
+        validateTopUpPositionState(state, options.expectedPosition);
+        validateTopUpAmounts(state, usdc, weth);
+        // The contract rechecks ownership, expiry, oracle constraints and live Aqua exposure.
+        await publicClient.simulateContract({
+          account: address!,
           address: family.vault.id,
           abi: familyVaultAbi,
-          functionName: "inspectSavingsStrategy",
-          args: [strategy],
+          functionName: "addToSavingsPosition",
+          args: [body.expectedStrategyHash, usdc, weth],
         });
-        if (parameters.feeBps !== ("feeBps" in body ? (body.feeBps ?? 30) : 30))
-          throw new Error("The Aqua trading fee does not match your review.");
+      }
+      if (
+        action === "dockSavings" &&
+        family?.vault &&
+        options?.expectedPosition
+      ) {
+        validateDockSavingsIntents(envelope, family.vault.id);
+        // Recheck after preparing the plan, then simulate the exact parent call.
+        // The existing no-argument dock method targets the active position at execution.
+        const state = await readAquaPosition(publicClient, family.vault.id);
+        queryClient.setQueryData(aquaPositionKey(family.vault.id), state);
+        validateClosePositionState(state, options.expectedPosition);
+        await publicClient.simulateContract({
+          account: address!,
+          address: family.vault.id,
+          abi: familyVaultAbi,
+          functionName: "dockSavingsPosition",
+        });
       }
       if (
         action === "addStarsToGoal" &&
@@ -198,6 +277,27 @@ export function useStarIntents() {
           goalId: body.goalId,
           amount: body.amount,
         });
+      validateQuestIntents(action, body, envelope, family, child);
+      if (
+        action === "shipSavings" &&
+        family?.vault &&
+        "usdcAmountUnits" in body
+      ) {
+        const strategy = validateShipSavingsIntents(envelope, {
+          vault: family.vault.id,
+          usdc: BigInt(body.usdcAmountUnits),
+          weth: BigInt(body.wethAmountUnits),
+        });
+        // The vault checks its maker, token pair, oracle price range and expiry.
+        const parameters = await publicClient.readContract({
+          address: family.vault.id,
+          abi: familyVaultAbi,
+          functionName: "inspectSavingsStrategy",
+          args: [strategy],
+        });
+        if (parameters.feeBps !== ("feeBps" in body ? (body.feeBps ?? 30) : 30))
+          throw new Error("The Aqua trading fee does not match your review.");
+      }
       if (action === "fundWeth") {
         if (
           signerRole !== "PARENT" ||
@@ -207,6 +307,7 @@ export function useStarIntents() {
           body.familyId !== family.id
         )
           throw new Error("Select an active family vault before adding WETH.");
+        // Resolve the token and ownership from the selected vault, not from the API plan.
         const vault = family.vault.id;
         const [weth, registry, familyId] = await Promise.all([
           publicClient.readContract({
@@ -260,6 +361,8 @@ export function useStarIntents() {
             : undefined;
         if (!requestChild)
           throw new Error("Select the child for this goal request.");
+        // Pin the destination to the immutable contract bound to the registered
+        // child's account, not an address supplied in the unsigned API plan.
         const goalsAddress = await publicClient.readContract({
           address: requestChild.wallet,
           abi: childAccountAbi,
@@ -274,6 +377,7 @@ export function useStarIntents() {
           child,
         );
       }
+      // A selected profile is not signing authority: the selected child's passkey must authenticate.
       if (action === "requestRedemption" || action === "cancelRedemption") {
         if (
           !child?.wallet ||
@@ -281,10 +385,11 @@ export function useStarIntents() {
           envelope.intents.some(
             (intent) => intent.to.toLowerCase() !== child.wallet.toLowerCase(),
           )
-        )
+        ) {
           throw new Error(
             "The request must target the selected child's passkey account.",
           );
+        }
         const requestedId =
           "goalId" in body
             ? body.goalId
@@ -302,20 +407,24 @@ export function useStarIntents() {
             ((decoded.functionName === "requestRedemption" ||
               decoded.functionName === "cancelRedemption") &&
               decoded.args[0] !== BigInt(requestedId))
-          )
+          ) {
             throw new Error(
               "The child operation does not match the requested action.",
             );
+          }
         }
       }
-      validateQuestIntents(action, body, envelope, family, child);
-      if (
-        envelope.intents.some(
-          (intent) =>
-            intent.chainId !== sepolia.id || intent.signerRole !== signerRole,
-        )
-      )
-        throw new Error("The API returned an intent for the wrong signer.");
+      if (envelope.intents.some((intent) => intent.chainId !== sepolia.id)) {
+        throw new Error("The API returned an intent for the wrong network.");
+      }
+      const invalidIntent = envelope.intents.find(
+        (intent) => intent.signerRole !== signerRole,
+      );
+      if (invalidIntent) {
+        throw new Error(
+          `The API returned an unexpected ${invalidIntent.signerRole} intent.`,
+        );
+      }
 
       let receiptBlock = 0n;
       for (const intent of envelope.intents) {
@@ -336,11 +445,20 @@ export function useStarIntents() {
         state: "indexing",
         message: "Transaction confirmed! Updating your wallet…",
       });
-      if (action === "shipSavings" && family?.vault) {
-        await queryClient.invalidateQueries({
-          queryKey: aquaPositionKey(family.vault.id),
-          exact: true,
-        });
+      if (
+        (action === "shipSavings" ||
+          action === "dockSavings" ||
+          action === "addSavings" ||
+          action === "fundWeth") &&
+        family?.vault
+      ) {
+        // Update the live position independently of subgraph indexing lag.
+        await Promise.all(
+          [aquaPositionKey(family.vault.id), aquaTopUpKey(family.vault.id)].map(
+            (queryKey) =>
+              queryClient.invalidateQueries({ queryKey, exact: true }),
+          ),
+        );
       }
       if (action === "addStarsToGoal" && child && "goalId" in body) {
         await queryClient.invalidateQueries({
