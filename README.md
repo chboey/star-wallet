@@ -6,8 +6,6 @@
 ## Explore Star Wallet
 
 - Try out our app: https://star-frontend-mu.vercel.app
-
-- View [Aqua](https://sepolia.etherscan.io/address/0x38C8c7073cEc4153fA090f819528E69a857f3D90) and [SwapVM](https://sepolia.etherscan.io/address/0x2b893B0B15D71E735BB975daF8ffe26CEC449629) on Sepolia Etherscan
 - Review The Graph [schema](contracts/subgraph/schema.graphql), [data sources](contracts/subgraph/subgraph.yaml) and [application queries](contracts/subgraph/queries)
 
 ## TL;DR — What is Star Wallet?
